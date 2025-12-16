@@ -779,12 +779,28 @@ document.getElementById('editProfileForm').addEventListener('submit', function(e
     
     fetch('profile_update.php', {
         method: 'POST',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        },
         body: formData
     })
-    .then(response => {
-        if (response.ok) {
-            // Reload the page to show updated profile
-            window.location.reload();
+    .then(response => response.json())
+    .then(data => {
+        if (data && data.success) {
+            const avatar = data.avatar_url;
+            if (avatar) {
+                const header = document.getElementById('headerAvatar');
+                const dropdown = document.getElementById('dropdownAvatar');
+                const profilePic = document.getElementById('profilePicture');
+                if (header) header.src = avatar;
+                if (dropdown) dropdown.src = avatar;
+                if (profilePic) profilePic.src = avatar;
+            }
+            // update bio if sent
+            const bioField = document.getElementById('profileBio');
+            const newBio = document.getElementById('bio') ? document.getElementById('bio').value : null;
+            if (bioField && newBio !== null) bioField.textContent = newBio;
+            editProfileModal.style.display = 'none';
         } else {
             alert('Došlo je do greške prilikom ažuriranja profila.');
         }

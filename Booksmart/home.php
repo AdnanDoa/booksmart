@@ -24,83 +24,115 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-$host = 'localhost';
-$dbname = 'booksmart';
-$username = 'root';
-$password = '';
-
-$pdo = null;
+// Use the same MySQLi connection and catalog logic as catalog.php
 $books = [];
-
 try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    
-    // Fetch first 6 books from database
-    $stmt = $pdo->prepare("SELECT * FROM books LIMIT 6");
-    $stmt->execute();
-    $books = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-} catch(PDOException $e) {
-    // If database connection fails, use fallback data
-    error_log("Database error: " . $e->getMessage());
-    
+    require_once __DIR__ . '/db_connect.php';
+    $result = $conn->query("SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url 
+                   FROM books b 
+                   JOIN book_files bf ON b.book_id = bf.book_id 
+                   WHERE bf.file_type = 'pdf' 
+                   ORDER BY b.book_id DESC 
+                   LIMIT 12");
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $books[] = $row;
+        }
+        $result->close();
+    }
+    // If no books were found, attempt an import
+    if (count($books) === 0) {
+        $apiUrl = "https://gutendex.com/books/?languages=en&mime_type=application/pdf&page=1";
+        $json = @file_get_contents($apiUrl);
+        if ($json !== false) {
+            $data = json_decode($json, true);
+            if (isset($data['results'])) {
+                foreach ($data['results'] as $book) {
+                    $title = $conn->real_escape_string($book['title'] ?? 'Untitled');
+                    $author = $conn->real_escape_string(!empty($book['authors']) ? $book['authors'][0]['name'] : 'Unknown Author');
+                    $description = $conn->real_escape_string(!empty($book['subjects']) ? implode(', ', array_slice($book['subjects'], 0, 4)) : 'Classic literature');
+
+                    // Find PDF URL
+                    $pdfUrl = '';
+                    if (!empty($book['formats']) && is_array($book['formats'])) {
+                        foreach ($book['formats'] as $mime => $url) {
+                            if (stripos($mime, 'pdf') !== false && $url) {
+                                $pdfUrl = $conn->real_escape_string($url);
+                                break;
+                            }
+                        }
+                    }
+                    if (empty($pdfUrl)) continue;
+
+                    // Find cover image
+                    $coverUrl = '';
+                    if (!empty($book['formats']) && is_array($book['formats'])) {
+                        foreach ($book['formats'] as $mime => $url) {
+                            if (stripos($mime, 'image') !== false && $url) {
+                                $coverUrl = $conn->real_escape_string($url);
+                                break;
+                            }
+                        }
+                    }
+                    if (empty($coverUrl)) {
+                        $coverUrl = $conn->real_escape_string("https://covers.openlibrary.org/b/title/" . rawurlencode($title) . "-L.jpg");
+                    }
+
+                    // Check if book already exists
+                    $check = $conn->query("SELECT book_id FROM books WHERE title = '$title' AND author = '$author'");
+                    if ($check && $check->num_rows === 0) {
+                        $conn->query("INSERT INTO books (title, author, description, cover_url, file_type, is_public_domain, created_at) 
+                                     VALUES ('$title', '$author', '$description', '$coverUrl', 'pdf', TRUE, NOW())");
+                        $bookId = $conn->insert_id;
+                        if ($bookId) {
+                            $conn->query("INSERT INTO book_files (book_id, file_type, file_url) 
+                                         VALUES ($bookId, 'pdf', '$pdfUrl')");
+                        }
+                    }
+                    if ($check) $check->close();
+                }
+            }
+        }
+
+        // Re-run select after import
+        $books = [];
+        $result = $conn->query("SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url 
+                   FROM books b 
+                   JOIN book_files bf ON b.book_id = bf.book_id 
+                   WHERE bf.file_type = 'pdf' 
+                   ORDER BY b.book_id DESC 
+                   LIMIT 12");
+        if ($result) {
+            while ($row = $result->fetch_assoc()) {
+                $books[] = $row;
+            }
+            $result->close();
+        }
+    }
+} catch (Exception $e) {
+    error_log('Catalog fetch failed: ' . $e->getMessage());
     // Fallback books data
     $books = [
-        [
-            'title' => 'The Silent Patient',
-            'author' => 'Alex Michaelides',
-            'cover_image' => 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80',
-            'rating' => 4.5,
-            'available' => true
-        ],
-        [
-            'title' => 'Where the Crawdads Sing',
-            'author' => 'Delia Owens',
-            'cover_image' => 'https://images.unsplash.com/photo-1512820790803-83ca734da794?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80',
-            'rating' => 4.8,
-            'available' => true
-        ],
-        [
-            'title' => 'Educated',
-            'author' => 'Tara Westover',
-            'cover_image' => 'https://images.unsplash.com/photo-1532012197267-da84d127e765?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80',
-            'rating' => 4.7,
-            'available' => false
-        ],
-        [
-            'title' => 'The Midnight Library',
-            'author' => 'Matt Haig',
-            'cover_image' => 'https://images.unsplash.com/photo-1621351183012-e2f9972dd9bf?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80',
-            'rating' => 4.2,
-            'available' => true
-        ],
-        [
-            'title' => 'The Hobbit',
-            'author' => 'J.R.R. Tolkien',
-            'cover_image' => 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80',
-            'rating' => 4.9,
-            'available' => true
-        ],
-        [
-            'title' => '1984',
-            'author' => 'George Orwell',
-            'cover_image' => 'https://images.unsplash.com/photo-1512820790803-83ca734da794?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=600&q=80',
-            'rating' => 4.6,
-            'available' => true
-        ]
+        ['title' => 'The Silent Patient', 'author' => 'Alex Michaelides', 'cover_image' => 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80'],
+        ['title' => 'Where the Crawdads Sing', 'author' => 'Delia Owens', 'cover_image' => 'https://images.unsplash.com/photo-1512820790803-83ca734da794?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80']
     ];
 }
 
 // Fetch user data
 $user = null;
-if ($pdo) {
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
-        $stmt->execute([$_SESSION['user_id']]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch(PDOException $e) {
-        error_log("Error fetching user data: " . $e->getMessage());
+// Use MySQLi connection from db_connect.php
+require_once __DIR__ . '/db_connect.php';
+if (isset($conn) && $conn) {
+    $user = null;
+    if ($stmt = $conn->prepare("SELECT * FROM users WHERE user_id = ?")) {
+        $stmt->bind_param('i', $_SESSION['user_id']);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $user = $res ? $res->fetch_assoc() : null;
+        $stmt->close();
+        if ($user && !empty($user['avatar_url']) && !preg_match('/^https?:\/\//', $user['avatar_url'])) {
+            $user['avatar_url'] = '/' . ltrim($user['avatar_url'], '/');
+        }
     }
 }
 ?>
@@ -940,9 +972,9 @@ if ($pdo) {
             </div>
             
             <div class="profile">
-                <img id="headerAvatar" src="<?php echo isset($user['avatar_url']) ? htmlspecialchars($user['avatar_url']) : 'https://i.pravatar.cc/150?img=32'; ?>" alt="Profile">
+                <img id="headerAvatar" src="<?php echo !empty($user['avatar_url']) ? htmlspecialchars($user['avatar_url']) : 'https://i.pravatar.cc/150?img=32'; ?>" alt="Profile">
                 <div class="profile-dropdown">
-                    <img id="dropdownAvatar" src="<?php echo isset($user['avatar_url']) ? htmlspecialchars($user['avatar_url']) : 'https://i.pravatar.cc/150?img=32'; ?>" alt="Profile">
+                    <img id="dropdownAvatar" src="<?php echo !empty($user['avatar_url']) ? htmlspecialchars($user['avatar_url']) : 'https://i.pravatar.cc/150?img=32'; ?>" alt="Profile">
                     <h3 id="headerName"><?php echo htmlspecialchars($_SESSION['user_name']); ?></h3>
                     <a href="profpage.php"><i class="fas fa-user"></i> My Profile</a>
                     <a href="#"><i class="fas fa-bookmark"></i> My Library</a>
@@ -969,6 +1001,165 @@ if ($pdo) {
         </div>
     </section>
 
+    <!-- Insert Catalog Modal and JS (copied from catalog.php) -->
+    <!-- Sexy Book Details Modal -->
+    <div id="book-modal">
+        <div class="modal-content">
+            <button class="modal-close" id="close-modal">
+                <i class="fas fa-times"></i>
+            </button>
+            <div class="modal-body">
+                <div class="modal-cover-section">
+                    <div class="cover-container">
+                        <img id="modal-cover" src="" alt="Book Cover">
+                        <div class="cover-overlay"></div>
+                    </div>
+                </div>
+                <div class="modal-details-section">
+                    <h2 id="modal-title">Book Title</h2>
+                    <p id="modal-author">by Author Name</p>
+                    
+                    <div class="modal-rating">
+                        <div class="stars">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star-half-alt"></i>
+                        </div>
+                        <span class="rating-value">4.5</span>
+                        <span class="rating-count">(12,345 reviews)</span>
+                    </div>
+                    
+                    <span id="modal-status" class="status-available">Available</span>
+                    
+                    <p class="modal-description" id="modal-description">
+                        Book description will appear here...
+                    </p>
+                    
+                    <div class="modal-meta">
+                        <div class="meta-item">
+                            <span class="meta-label">Published</span>
+                            <span class="meta-value" id="modal-published">Unknown</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Pages</span>
+                            <span class="meta-value" id="modal-pages">Unknown</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Genre</span>
+                            <span class="meta-value" id="modal-genre">Unknown</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Format</span>
+                            <span class="meta-value" id="modal-format">PDF</span>
+                        </div>
+                    </div>
+                    
+                    <div class="modal-actions">
+                        <button class="action-btn primary" id="read-pdf">
+                            <i class="fas fa-book-open"></i> Read PDF
+                        </button>
+                        <button class="action-btn secondary">
+                            <i class="fas fa-bookmark"></i> Add to Library
+                        </button>
+                        <button class="action-btn secondary">
+                            <i class="fas fa-share-alt"></i> Share
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Book data storage (JSON-encoded to avoid JS syntax injection)
+        const booksData = <?php
+            $__books_map = [];
+            foreach ($books as $__b) {
+                if (empty($__b['book_id'])) continue;
+                $__books_map[(string)$__b['book_id']] = [
+                    'title' => $__b['title'] ?? '',
+                    'author' => $__b['author'] ?? '',
+                    'description' => $__b['description'] ?? '',
+                    'pdf_url' => $__b['file_url'] ?? '',
+                    'cover_url' => $__b['cover_url'] ?? ($__b['cover_image'] ?? ''),
+                    'rating' => 4.5,
+                    'status' => 'available'
+                ];
+            }
+            echo json_encode($__books_map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
+        ?>;
+
+        // Modal functionality
+        const modal = document.getElementById('book-modal');
+        const closeModalBtn = document.getElementById('close-modal');
+        const readPdfBtn = document.getElementById('read-pdf');
+        
+        // Open modal when clicking on book cards or view details buttons
+        document.querySelectorAll('.book-card, .view-details').forEach(element => {
+            element.addEventListener('click', (e) => {
+                if (e.target.closest('.book-action') && !e.target.closest('.view-details')) {
+                    return;
+                }
+                const bookId = e.target.closest('.book-card').getAttribute('data-book-id');
+                openBookModal(bookId);
+            });
+        });
+        
+        function openBookModal(bookId) {
+            const book = booksData[bookId];
+            if (book) {
+                document.getElementById('modal-cover').src = book.cover_url;
+                document.getElementById('modal-title').textContent = book.title;
+                document.getElementById('modal-author').textContent = `by ${book.author}`;
+                document.getElementById('modal-description').textContent = book.description;
+                document.querySelector('.rating-value').textContent = book.rating;
+                const statusElement = document.getElementById('modal-status');
+                statusElement.textContent = book.status.charAt(0).toUpperCase() + book.status.slice(1);
+                statusElement.className = '';
+                statusElement.classList.add('status-available');
+                readPdfBtn.onclick = function() {
+                    if (book.pdf_url) window.open(book.pdf_url, '_blank');
+                };
+                modal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+        
+        closeModalBtn.addEventListener('click', () => {
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        });
+        
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('active');
+                document.body.style.overflow = 'auto';
+            }
+        });
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active')) {
+                modal.classList.remove('active');
+                document.body.style.overflow = 'auto';
+            }
+        });
+
+        document.querySelectorAll('.book-action').forEach(button => {
+            button.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const action = this.querySelector('i').className;
+                const bookTitle = this.closest('.book-card').querySelector('.book-title').textContent;
+                if (action.includes('fa-bookmark')) {
+                    alert(`"${bookTitle}" added to your library`);
+                } else if (action.includes('fa-share-alt')) {
+                    alert(`Sharing "${bookTitle}"`);
+                }
+            });
+        });
+    </script>
+
     <!-- Featured Books -->
     <section class="section">
         <div class="section-header">
@@ -977,36 +1168,32 @@ if ($pdo) {
         </div>
         
         <div class="books-grid">
-            <?php if(count($books) > 0): ?>
-                <?php foreach($books as $book): ?>
-                    <div class="book-card">
-                        <div class="book-cover">
-                            <img src="<?php echo htmlspecialchars($book['cover_image']); ?>" alt="<?php echo htmlspecialchars($book['title']); ?>">
-                            <div class="book-overlay">
-                                <button class="book-action"><i class="fas fa-eye"></i></button>
-                                <button class="book-action"><i class="fas fa-bookmark"></i></button>
-                                <button class="book-action"><i class="fas fa-share-alt"></i></button>
+            <?php if (!empty($books)): ?>
+                <?php foreach ($books as $book): ?>
+                    <div class='book-card' data-book-id='<?php echo htmlspecialchars($book['book_id'] ?? ''); ?>'>
+                        <div class='book-cover'>
+                            <img src='<?php echo htmlspecialchars($book['cover_url'] ?? $book['cover_image'] ?? ''); ?>' alt='<?php echo htmlspecialchars($book['title'] ?? ''); ?>' onerror="this.src='https://images.unsplash.com/photo-1544947950-fa07a98d237f?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80'">
+                            <div class='book-overlay'>
+                                <button class='book-action view-details'><i class='fas fa-eye'></i></button>
+                                <button class='book-action'><i class='fas fa-bookmark'></i></button>
+                                <button class='book-action'><i class='fas fa-share-alt'></i></button>
                             </div>
                         </div>
-                        <div class="book-info">
-                            <h3 class="book-title"><?php echo htmlspecialchars($book['title']); ?></h3>
-                            <p class="book-author"><?php echo htmlspecialchars($book['author']); ?></p>
-                            <div class="book-meta">
-                                <div class="book-rating">
-                                    <i class="fas fa-star"></i>
-                                    <span><?php echo isset($book['rating']) ? number_format($book['rating'], 1) : '4.0'; ?></span>
+                        <div class='book-info'>
+                            <h3 class='book-title'><?php echo htmlspecialchars($book['title'] ?? ''); ?></h3>
+                            <p class='book-author'><?php echo htmlspecialchars($book['author'] ?? ''); ?></p>
+                            <div class='book-meta'>
+                                <div class='book-rating'>
+                                    <i class='fas fa-star'></i>
+                                    <span>4.5</span>
                                 </div>
-                                <span class="book-status <?php echo (isset($book['available']) && $book['available']) ? 'status-available' : ''; ?>">
-                                    <?php echo (isset($book['available']) && $book['available']) ? 'Available' : 'Borrowed'; ?>
-                                </span>
+                                <span class='book-status status-available'>Available</span>
                             </div>
                         </div>
                     </div>
                 <?php endforeach; ?>
             <?php else: ?>
-                <div class="no-books-message">
-                    <p>No books available at the moment. Check back later!</p>
-                </div>
+                <p style='grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--gray);'>No books found in the database.</p>
             <?php endif; ?>
         </div>
     </section>
