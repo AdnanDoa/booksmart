@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <script type="text/javascript">
+    function operacije(){
+    var broj1=new Number(document.Forma.Sabirak1.value);
+    
+    var broj2=new Number(document.Forma.Sabirak2.value);
+    
+    var zbir=new Number();
+    
+    var razlika=new Number();
+    
+    var proizvod=new Number();
+    
+    var kolicnik=new Number();
+    
+    zbir=broj1 + broj2;
+    
+    razlika=broj1-broj2;
+
+    proizvod=broj1*broj2;
+
+    kolicnik=broj1/broj2;
+
+    if(document.Forma.Sabiranje.checked==true){
+
+            alert("Zbir dva broja" + broj1 + " i " + broj2 + " jeste broj " + zbir);
+    }
+    else if(document.Forma.Oduzimanje.checked==true)
+        {
+            alert("Razlika dva broja " + broj1 + " i " + broj2 + " jeste broj " + razlika);
+        } 
+        else if(document.Forma.Mnozenje.checked==true)
+  {
+    alert("Proizvod dva broja " + broj1 + " i " + broj2 + " jeste broj " + proizvod);
+  } else if(document.Forma.Dijeljenje.checked==true)
+  {
+  }
+}
+alert("Količnik dva broja " + broj1 + " i " + broj2 + " jeste broj " + kolicnik);
+</script>
+
+
+    
+
+
+
+
+</body>
+</html>

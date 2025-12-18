@@ -107,7 +107,7 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 // Prepare response: return absolute avatar URL for clients
 $absoluteAvatar = null;
 if (isset($relative) && $relative) {
-    $absoluteAvatar = '/' . ltrim($relative, '/');
+    $absoluteAvatar = '' . ltrim($relative, '');
 }
 
 if ($isAjax) {

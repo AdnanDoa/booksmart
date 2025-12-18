@@ -26,9 +26,7 @@ $user_stmt->close();
 // Set default avatar if none exists
 $avatar_url = (!empty($user_data['avatar_url'])) ? $user_data['avatar_url'] : 'https://i.pravatar.cc/150?img=32';
 // If avatar_url is a relative path, make it absolute (but only for non-default)
-if ($avatar_url && $avatar_url !== 'https://i.pravatar.cc/150?img=32' && !preg_match('/^https?:\/\//', $avatar_url)) {
-    $avatar_url = '/' . ltrim($avatar_url, '/');
-}
+
 
 // Get user data
 $user_name = $_SESSION['user_name'] ?? 'User';
@@ -703,7 +701,6 @@ function e($s) {
             font-size: 0.9rem;
         }
 
-        /* Sexy Modal Styles */
         #book-modal {
             display: none;
             position: fixed;

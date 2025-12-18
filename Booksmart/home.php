@@ -130,9 +130,6 @@ if (isset($conn) && $conn) {
         $res = $stmt->get_result();
         $user = $res ? $res->fetch_assoc() : null;
         $stmt->close();
-        if ($user && !empty($user['avatar_url']) && !preg_match('/^https?:\/\//', $user['avatar_url'])) {
-            $user['avatar_url'] = '/' . ltrim($user['avatar_url'], '/');
-        }
     }
 }
 ?>
@@ -814,6 +811,7 @@ if (isset($conn) && $conn) {
             background: var(--primary-dark);
             transform: translateY(-2px);
         }
+        
 
         /* Footer */
         footer {
@@ -894,6 +892,325 @@ if (isset($conn) && $conn) {
             color: rgba(255, 255, 255, 0.6);
             font-size: 0.9rem;
         }
+        /* Book Modal Styles */
+#book-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+#book-modal.active {
+    display: flex;
+    opacity: 1;
+    animation: modalFadeIn 0.4s ease;
+}
+
+@keyframes modalFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.modal-content {
+    background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+    border-radius: var(--border-radius-lg);
+    max-width: 900px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+    transform: scale(0.9);
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    overflow: hidden;
+}
+
+#book-modal.active .modal-content {
+    transform: scale(1);
+}
+
+.modal-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(10px);
+    border: none;
+    font-size: 1.5em;
+    color: var(--primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: var(--transition);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.modal-close:hover {
+    background: var(--primary);
+    color: white;
+    transform: rotate(90deg);
+}
+
+.modal-body {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+@media (min-width: 768px) {
+    .modal-body {
+        flex-direction: row;
+    }
+}
+
+.modal-cover-section {
+    flex: 1;
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    position: relative;
+    overflow: hidden;
+}
+
+.modal-cover-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" opacity="0.05"><path fill="white" d="M500,100 C700,50 900,150 900,350 C900,550 700,650 500,600 C300,650 100,550 100,350 C100,150 300,50 500,100 Z"/></svg>');
+    background-size: cover;
+}
+
+.cover-container {
+    position: relative;
+    width: 100%;
+    max-width: 300px;
+    margin: 0 auto;
+    z-index: 2;
+}
+
+#modal-cover {
+    width: 100%;
+    border-radius: var(--border-radius);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    transition: var(--transition);
+}
+
+.cover-container:hover #modal-cover {
+    transform: translateY(-10px) rotateY(5deg);
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+}
+
+.cover-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 100%);
+    border-radius: var(--border-radius);
+    opacity: 0;
+    transition: var(--transition);
+}
+
+.cover-container:hover .cover-overlay {
+    opacity: 1;
+}
+
+.modal-details-section {
+    flex: 1.5;
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+#modal-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.2rem;
+    margin-bottom: 10px;
+    color: var(--dark);
+    line-height: 1.2;
+}
+
+#modal-author {
+    font-size: 1.2rem;
+    color: var(--gray);
+    margin-bottom: 20px;
+    font-style: italic;
+}
+
+.modal-rating {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.stars {
+    display: flex;
+    gap: 5px;
+}
+
+.stars i {
+    color: var(--warning);
+    font-size: 1.2rem;
+}
+
+.rating-value {
+    font-weight: 600;
+    color: var(--dark);
+}
+
+.rating-count {
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+#modal-status {
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 30px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 25px;
+    align-self: flex-start;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+}
+
+.status-available {
+    background: rgba(76, 201, 240, 0.2);
+    color: var(--success);
+}
+
+.status-borrowed {
+    background: rgba(247, 37, 133, 0.2);
+    color: var(--accent);
+}
+
+.status-reserved {
+    background: rgba(255, 158, 0, 0.2);
+    color: var(--warning);
+}
+
+.modal-description {
+    margin-bottom: 30px;
+    line-height: 1.7;
+    color: var(--gray);
+}
+
+.modal-meta {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 30px;
+}
+
+.meta-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.meta-label {
+    font-size: 0.8rem;
+    color: var(--gray);
+    margin-bottom: 5px;
+}
+
+.meta-value {
+    font-weight: 600;
+    color: var(--dark);
+}
+
+.modal-actions {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    flex: 1;
+    min-width: 120px;
+    padding: 14px 20px;
+    border-radius: 30px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    cursor: pointer;
+    border: none;
+    font-size: 1rem;
+    gap: 8px;
+}
+
+.action-btn.primary {
+    background: var(--primary);
+    color: white;
+}
+
+.action-btn.secondary {
+    background: transparent;
+    color: var(--primary);
+    border: 2px solid var(--primary);
+}
+
+.action-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+}
+
+.status-borrowed {
+    background: rgba(247, 37, 133, 0.2);
+    color: var(--accent);
+}
+
+.status-reserved {
+    background: rgba(255, 158, 0, 0.2);
+    color: var(--warning);
+}
+
+.action-btn.primary:hover {
+    background: var(--primary-dark);
+}
+
+.action-btn.secondary:hover {
+    background: rgba(67, 97, 238, 0.1);
+}
+
+/* Floating animation for modal */
+@keyframes float {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+    100% { transform: translateY(0px); }
+}
+
+.modal-content {
+    animation: float 6s ease-in-out infinite;
+}
 
         /* Responsive Design */
         @media (max-width: 1100px) {
@@ -1001,164 +1318,8 @@ if (isset($conn) && $conn) {
         </div>
     </section>
 
-    <!-- Insert Catalog Modal and JS (copied from catalog.php) -->
-    <!-- Sexy Book Details Modal -->
-    <div id="book-modal">
-        <div class="modal-content">
-            <button class="modal-close" id="close-modal">
-                <i class="fas fa-times"></i>
-            </button>
-            <div class="modal-body">
-                <div class="modal-cover-section">
-                    <div class="cover-container">
-                        <img id="modal-cover" src="" alt="Book Cover">
-                        <div class="cover-overlay"></div>
-                    </div>
-                </div>
-                <div class="modal-details-section">
-                    <h2 id="modal-title">Book Title</h2>
-                    <p id="modal-author">by Author Name</p>
-                    
-                    <div class="modal-rating">
-                        <div class="stars">
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star-half-alt"></i>
-                        </div>
-                        <span class="rating-value">4.5</span>
-                        <span class="rating-count">(12,345 reviews)</span>
-                    </div>
-                    
-                    <span id="modal-status" class="status-available">Available</span>
-                    
-                    <p class="modal-description" id="modal-description">
-                        Book description will appear here...
-                    </p>
-                    
-                    <div class="modal-meta">
-                        <div class="meta-item">
-                            <span class="meta-label">Published</span>
-                            <span class="meta-value" id="modal-published">Unknown</span>
-                        </div>
-                        <div class="meta-item">
-                            <span class="meta-label">Pages</span>
-                            <span class="meta-value" id="modal-pages">Unknown</span>
-                        </div>
-                        <div class="meta-item">
-                            <span class="meta-label">Genre</span>
-                            <span class="meta-value" id="modal-genre">Unknown</span>
-                        </div>
-                        <div class="meta-item">
-                            <span class="meta-label">Format</span>
-                            <span class="meta-value" id="modal-format">PDF</span>
-                        </div>
-                    </div>
-                    
-                    <div class="modal-actions">
-                        <button class="action-btn primary" id="read-pdf">
-                            <i class="fas fa-book-open"></i> Read PDF
-                        </button>
-                        <button class="action-btn secondary">
-                            <i class="fas fa-bookmark"></i> Add to Library
-                        </button>
-                        <button class="action-btn secondary">
-                            <i class="fas fa-share-alt"></i> Share
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Book data storage (JSON-encoded to avoid JS syntax injection)
-        const booksData = <?php
-            $__books_map = [];
-            foreach ($books as $__b) {
-                if (empty($__b['book_id'])) continue;
-                $__books_map[(string)$__b['book_id']] = [
-                    'title' => $__b['title'] ?? '',
-                    'author' => $__b['author'] ?? '',
-                    'description' => $__b['description'] ?? '',
-                    'pdf_url' => $__b['file_url'] ?? '',
-                    'cover_url' => $__b['cover_url'] ?? ($__b['cover_image'] ?? ''),
-                    'rating' => 4.5,
-                    'status' => 'available'
-                ];
-            }
-            echo json_encode($__books_map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
-        ?>;
-
-        // Modal functionality
-        const modal = document.getElementById('book-modal');
-        const closeModalBtn = document.getElementById('close-modal');
-        const readPdfBtn = document.getElementById('read-pdf');
-        
-        // Open modal when clicking on book cards or view details buttons
-        document.querySelectorAll('.book-card, .view-details').forEach(element => {
-            element.addEventListener('click', (e) => {
-                if (e.target.closest('.book-action') && !e.target.closest('.view-details')) {
-                    return;
-                }
-                const bookId = e.target.closest('.book-card').getAttribute('data-book-id');
-                openBookModal(bookId);
-            });
-        });
-        
-        function openBookModal(bookId) {
-            const book = booksData[bookId];
-            if (book) {
-                document.getElementById('modal-cover').src = book.cover_url;
-                document.getElementById('modal-title').textContent = book.title;
-                document.getElementById('modal-author').textContent = `by ${book.author}`;
-                document.getElementById('modal-description').textContent = book.description;
-                document.querySelector('.rating-value').textContent = book.rating;
-                const statusElement = document.getElementById('modal-status');
-                statusElement.textContent = book.status.charAt(0).toUpperCase() + book.status.slice(1);
-                statusElement.className = '';
-                statusElement.classList.add('status-available');
-                readPdfBtn.onclick = function() {
-                    if (book.pdf_url) window.open(book.pdf_url, '_blank');
-                };
-                modal.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            }
-        }
-        
-        closeModalBtn.addEventListener('click', () => {
-            modal.classList.remove('active');
-            document.body.style.overflow = 'auto';
-        });
-        
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('active');
-                document.body.style.overflow = 'auto';
-            }
-        });
-        
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modal.classList.contains('active')) {
-                modal.classList.remove('active');
-                document.body.style.overflow = 'auto';
-            }
-        });
-
-        document.querySelectorAll('.book-action').forEach(button => {
-            button.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const action = this.querySelector('i').className;
-                const bookTitle = this.closest('.book-card').querySelector('.book-title').textContent;
-                if (action.includes('fa-bookmark')) {
-                    alert(`"${bookTitle}" added to your library`);
-                } else if (action.includes('fa-share-alt')) {
-                    alert(`Sharing "${bookTitle}"`);
-                }
-            });
-        });
-    </script>
+   
+  
 
     <!-- Featured Books -->
     <section class="section">
@@ -1197,6 +1358,135 @@ if (isset($conn) && $conn) {
             <?php endif; ?>
         </div>
     </section>
+     <script>
+        const booksData = <?php
+    $__books_map = [];
+    foreach ($books as $__b) {
+        if (empty($__b['book_id'])) continue;
+        $__books_map[(string)$__b['book_id']] = [
+            'title' => $__b['title'] ?? '',
+            'author' => $__b['author'] ?? '',
+            'description' => $__b['description'] ?? '',
+            'pdf_url' => $__b['file_url'] ?? '',
+            'cover_url' => $__b['cover_url'] ?? ($__b['cover_image'] ?? ''),
+            'rating' => 4.5,
+            'status' => 'available'
+        ];
+    }
+    echo json_encode($__books_map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
+?>;
+
+// Wait for DOM to be fully loaded
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initializing book modal...');
+    
+    const modal = document.getElementById('book-modal');
+    const closeModalBtn = document.getElementById('close-modal');
+    const readPdfBtn = document.getElementById('read-pdf');
+    
+    // Debug log to check if elements exist
+    console.log('Book modal found:', !!modal);
+    console.log('Close button found:', !!closeModalBtn);
+    console.log('Read PDF button found:', !!readPdfBtn);
+    
+    // Only proceed if modal exists
+    if (!modal) {
+        console.error('Book modal element not found!');
+        return;
+    }
+    
+    // Book card click handlers
+    document.querySelectorAll('.book-card').forEach(element => {
+        element.addEventListener('click', (e) => {
+            const bookActionBtn = e.target.closest('.book-action');
+            if (bookActionBtn && !bookActionBtn.classList.contains('view-details')) {
+                return;
+            }
+            
+            if (bookActionBtn && bookActionBtn.classList.contains('view-details')) {
+                const bookId = element.getAttribute('data-book-id');
+                openBookModal(bookId);
+                return;
+            }
+            
+            const bookId = element.getAttribute('data-book-id');
+            openBookModal(bookId);
+        });
+    });
+
+    // Direct handler for eye button
+    document.querySelectorAll('.view-details').forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const bookId = button.closest('.book-card').getAttribute('data-book-id');
+            openBookModal(bookId);
+        });
+    });
+    
+    function openBookModal(bookId) {
+        const book = booksData[bookId];
+        if (book) {
+            document.getElementById('modal-cover').src = book.cover_url;
+            document.getElementById('modal-title').textContent = book.title;
+            document.getElementById('modal-author').textContent = `by ${book.author}`;
+            document.getElementById('modal-description').textContent = book.description;
+            document.querySelector('.rating-value').textContent = book.rating;
+            const statusElement = document.getElementById('modal-status');
+            statusElement.textContent = book.status.charAt(0).toUpperCase() + book.status.slice(1);
+            statusElement.className = '';
+            statusElement.classList.add('status-available');
+            
+            // Set PDF button handler
+            if (readPdfBtn) {
+                readPdfBtn.onclick = function() {
+                    if (book.pdf_url) window.open(book.pdf_url, '_blank');
+                };
+            }
+            
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+    }
+    
+    // Close modal handlers
+    if (closeModalBtn) {
+        closeModalBtn.addEventListener('click', () => {
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        });
+    }
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+    });
+    
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal.classList.contains('active')) {
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+    });
+
+    // Bookmark and share buttons
+    document.querySelectorAll('.book-action').forEach(button => {
+        button.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const action = this.querySelector('i').className;
+            const bookTitle = this.closest('.book-card').querySelector('.book-title').textContent;
+            if (action.includes('fa-bookmark')) {
+                alert(`"${bookTitle}" added to your library`);
+            } else if (action.includes('fa-share-alt')) {
+                alert(`Sharing "${bookTitle}"`);
+            }
+        });
+    });
+    
+    console.log('Book modal initialized successfully');
+});
+     </script>
 
     <!-- Categories -->
     <section class="categories">
@@ -1379,31 +1669,113 @@ if (isset($conn) && $conn) {
     </div>
 
     <script>
-    // Edit Profile Modal
+   // Wait for DOM to be fully loaded
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initializing profile modal...');
+    
+    const profileModal = document.getElementById('profileModal');
     const openEdit = document.getElementById('openEditProfile');
-    if (openEdit) {
-        openEdit.addEventListener('click', function(e){
+    const closeBtn = document.getElementById('closeProfile');
+    
+    // Debug log to check if elements exist
+    console.log('Profile modal found:', !!profileModal);
+    console.log('Open edit button found:', !!openEdit);
+    console.log('Close button found:', !!closeBtn);
+    
+    if (openEdit && profileModal) {
+        openEdit.addEventListener('click', function(e) {
             e.preventDefault();
-            const modal = document.getElementById('profileModal');
-            if (modal) modal.style.display = 'flex';
+            profileModal.style.display = 'flex';
         });
+    } else {
+        console.warn('Profile modal elements not found');
     }
 
-    const closeBtn = document.getElementById('closeProfile');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', function(){
-            const modal = document.getElementById('profileModal');
-            if (modal) modal.style.display = 'none';
+    if (closeBtn && profileModal) {
+        closeBtn.addEventListener('click', function() {
+            profileModal.style.display = 'none';
         });
     }
 
     // Close modal when clicking outside
     window.addEventListener('click', function(event) {
-        const modal = document.getElementById('profileModal');
-        if (event.target === modal) {
-            modal.style.display = 'none';
+        if (profileModal && event.target === profileModal) {
+            profileModal.style.display = 'none';
         }
     });
+    
+    console.log('Profile modal initialized successfully');
+});
     </script>
+    <!-- Sexy Book Details Modal -->
+<div id="book-modal">
+    <div class="modal-content">
+        <button class="modal-close" id="close-modal">
+            <i class="fas fa-times"></i>
+        </button>
+        <div class="modal-body">
+            <div class="modal-cover-section">
+                <div class="cover-container">
+                    <img id="modal-cover" src="" alt="Book Cover">
+                    <div class="cover-overlay"></div>
+                </div>
+            </div>
+            <div class="modal-details-section">
+                <h2 id="modal-title">Book Title</h2>
+                <p id="modal-author">by Author Name</p>
+                
+                <div class="modal-rating">
+                    <div class="stars">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star-half-alt"></i>
+                    </div>
+                    <span class="rating-value">4.5</span>
+                    <span class="rating-count">(12,345 reviews)</span>
+                </div>
+                
+                <span id="modal-status" class="status-available">Available</span>
+                
+                <p class="modal-description" id="modal-description">
+                    Book description will appear here...
+                </p>
+                
+                <div class="modal-meta">
+                    <div class="meta-item">
+                        <span class="meta-label">Published</span>
+                        <span class="meta-value" id="modal-published">Unknown</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Pages</span>
+                        <span class="meta-value" id="modal-pages">Unknown</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Genre</span>
+                        <span class="meta-value" id="modal-genre">Unknown</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Format</span>
+                        <span class="meta-value" id="modal-format">PDF</span>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button class="action-btn primary" id="read-pdf">
+                        <i class="fas fa-book-open"></i> Read PDF
+                    </button>
+                    <button class="action-btn secondary">
+                        <i class="fas fa-bookmark"></i> Add to Library
+                    </button>
+                    <button class="action-btn secondary">
+                        <i class="fas fa-share-alt"></i> Share
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
