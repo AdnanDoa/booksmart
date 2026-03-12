@@ -1277,7 +1277,7 @@ if (isset($conn) && $conn) {
         <nav class="nav-links">
             <a href="home.php" class="active">Home</a>
             <a href="catalog.php">Catalog</a>
-            <a href="#">My Books</a>
+            <a href="mybooks.php">My Books</a>
             <a href="#">Reviews</a>
             <a href="#">Community</a>
         </nav>

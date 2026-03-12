@@ -1088,7 +1088,7 @@ function e($s) {
         <nav class="nav-links">
             <a href="home.php">Home</a>
             <a href="#" class="active">Catalog</a>
-            <a href="#">My Books</a>
+            <a href="mybooks.php">My Books</a>
             <a href="#">Reviews</a>
             <a href="#">Community</a>
         </nav>
