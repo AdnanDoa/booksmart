@@ -1226,77 +1226,85 @@ function e($s) {
         </div>
     </footer>
 
-    <!-- Sexy Book Details Modal -->
-    <div id="book-modal">
-        <div class="modal-content">
-            <button class="modal-close" id="close-modal">
-                <i class="fas fa-times"></i>
-            </button>
-            <div class="modal-body">
-                <div class="modal-cover-section">
-                    <div class="cover-container">
-                        <img id="modal-cover" src="" alt="Book Cover">
-                        <div class="cover-overlay"></div>
+ <!-- Book Details Modal -->
+<div id="book-modal">
+    <div class="modal-content">
+        <button class="modal-close" id="close-modal">
+            <i class="fas fa-times"></i>
+        </button>
+        <div class="modal-body">
+            <div class="modal-cover-section">
+                <div class="cover-container">
+                    <img id="modal-cover" src="" alt="Book Cover">
+                    <div class="cover-overlay"></div>
+                </div>
+            </div>
+            <div class="modal-details-section">
+                <h2 id="modal-title">Book Title</h2>
+                <p id="modal-author">by Author Name</p>
+                
+                <div class="modal-rating">
+                    <div class="stars">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star-half-alt"></i>
+                    </div>
+                    <span class="rating-value">4.5</span>
+                    <span class="rating-count">(12,345 reviews)</span>
+                </div>
+                
+                <span id="modal-status" class="status-reading">Currently Reading</span>
+                
+                <!-- PROGRESS BAR SECTION - THIS WAS MISSING -->
+                <div class="modal-progress">
+                    <div class="progress-header">
+                        <span>Reading Progress</span>
+                        <span id="progress-value">0%</span>
+                    </div>
+                    <input type="range" id="progress-slider" class="progress-slider" min="0" max="100" value="0">
+                </div>
+                
+                <p class="modal-description" id="modal-description">
+                    Book description will appear here...
+                </p>
+                
+                <div class="modal-meta">
+                    <div class="meta-item">
+                        <span class="meta-label">Published</span>
+                        <span class="meta-value" id="modal-published">Unknown</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Pages</span>
+                        <span class="meta-value" id="modal-pages">Unknown</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Genre</span>
+                        <span class="meta-value" id="modal-genre">Unknown</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Format</span>
+                        <span class="meta-value" id="modal-format">PDF</span>
                     </div>
                 </div>
-                <div class="modal-details-section">
-                    <h2 id="modal-title">Book Title</h2>
-                    <p id="modal-author">by Author Name</p>
-                    
-                    <div class="modal-rating">
-                        <div class="stars">
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star"></i>
-                            <i class="fas fa-star-half-alt"></i>
-                        </div>
-                        <span class="rating-value">4.5</span>
-                        <span class="rating-count">(12,345 reviews)</span>
-                    </div>
-                    
-                    <span id="modal-status" class="status-available">Available</span>
-                    
-                    <p class="modal-description" id="modal-description">
-                        Book description will appear here...
-                    </p>
-                    
-                    <div class="modal-meta">
-                        <div class="meta-item">
-                            <span class="meta-label">Published</span>
-                            <span class="meta-value" id="modal-published">Unknown</span>
-                        </div>
-                        <div class="meta-item">
-                            <span class="meta-label">Pages</span>
-                            <span class="meta-value" id="modal-pages">Unknown</span>
-                        </div>
-                        <div class="meta-item">
-                            <span class="meta-label">Genre</span>
-                            <span class="meta-value" id="modal-genre">Unknown</span>
-                        </div>
-                        <div class="meta-item">
-                            <span class="meta-label">Format</span>
-                            <span class="meta-value" id="modal-format">PDF</span>
-                        </div>
-                    </div>
-                    
-                    <div class="modal-actions">
-                        <button class="action-btn primary" id="read-pdf">
-                            <i class="fas fa-book-open"></i> Read PDF
-                        </button>
-                        <button class="action-btn secondary">
-                            <i class="fas fa-bookmark"></i> Add to Library
-                        </button>
-                        <button class="action-btn secondary">
-                            <i class="fas fa-share-alt"></i> Share
-                        </button>
-                    </div>
+                
+                <div class="modal-actions">
+                    <button class="action-btn primary" id="read-pdf">
+                        <i class="fas fa-book-open"></i> Read
+                    </button>
+                    <button class="action-btn secondary" id="update-status">
+                        <i class="fas fa-sync-alt"></i> Update Status
+                    </button>
+                    <button class="action-btn danger" id="remove-book">
+                        <i class="fas fa-trash"></i> Remove
+                    </button>
                 </div>
             </div>
         </div>
     </div>
-
-    <script>
+</div>
+<script>
         // Book data storage
         const booksData = {};
         
@@ -1312,25 +1320,22 @@ function e($s) {
             };
         <?php endforeach; ?>
 
+        // Global variable to track current book in modal
+        let currentBookId = null;
+
         // Modal functionality
         const modal = document.getElementById('book-modal');
         const closeModalBtn = document.getElementById('close-modal');
         const readPdfBtn = document.getElementById('read-pdf');
         
-        // Open modal when clicking on book cards or view details buttons
-        document.querySelectorAll('.book-card, .view-details').forEach(element => {
-            element.addEventListener('click', (e) => {
-                // Prevent event bubbling for buttons inside book cards
-                if (e.target.closest('.book-action') && !e.target.closest('.view-details')) {
-                    return;
-                }
-                
-                const bookId = e.target.closest('.book-card').getAttribute('data-book-id');
-                openBookModal(bookId);
-            });
-        });
+        // Get the Add to Library button (the secondary button in modal)
+        const addToLibraryBtn = document.querySelector('.modal-actions .action-btn.secondary');
         
+        // Open modal function
         function openBookModal(bookId) {
+            console.log('Opening modal for book ID:', bookId);
+            currentBookId = bookId;
+            
             const book = booksData[bookId];
             
             if (book) {
@@ -1343,18 +1348,19 @@ function e($s) {
                 // Update rating
                 document.querySelector('.rating-value').textContent = book.rating;
                 
+                // Reset the Add to Library button
+                if (addToLibraryBtn) {
+                    addToLibraryBtn.innerHTML = '<i class="fas fa-bookmark"></i> Add to Library';
+                    addToLibraryBtn.style.background = '';
+                    addToLibraryBtn.style.borderColor = '';
+                    addToLibraryBtn.style.color = '';
+                    addToLibraryBtn.disabled = false;
+                }
+                
                 // Update status
                 const statusElement = document.getElementById('modal-status');
-                statusElement.textContent = book.status.charAt(0).toUpperCase() + book.status.slice(1);
-                statusElement.className = '';
-                
-                if (book.status === 'available') {
-                    statusElement.classList.add('status-available');
-                } else if (book.status === 'borrowed') {
-                    statusElement.classList.add('status-borrowed');
-                } else if (book.status === 'reserved') {
-                    statusElement.classList.add('status-reserved');
-                }
+                statusElement.textContent = 'Available';
+                statusElement.className = 'status-available';
                 
                 // Set PDF URL for reading
                 readPdfBtn.onclick = function() {
@@ -1364,15 +1370,113 @@ function e($s) {
                 // Show modal
                 modal.classList.add('active');
                 document.body.style.overflow = 'hidden';
+            } else {
+                console.error('Book not found:', bookId);
             }
         }
         
+        // Open modal when clicking on book cards
+        document.querySelectorAll('.book-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Don't open modal if clicking on action buttons
+                if (e.target.closest('.book-action')) {
+                    return;
+                }
+                
+                const bookId = card.getAttribute('data-book-id');
+                openBookModal(bookId);
+            });
+        });
+        
+        // Handle view details button clicks
+        document.querySelectorAll('.view-details').forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const bookId = button.closest('.book-card').getAttribute('data-book-id');
+                openBookModal(bookId);
+            });
+        });
+        
+        // Add click handler for Add to Library button
+        if (addToLibraryBtn) {
+            addToLibraryBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                console.log('Add to Library clicked');
+                console.log('Current book ID:', currentBookId);
+                
+                if (!currentBookId) {
+                    alert('No book selected');
+                    return;
+                }
+                
+                // Store original button content
+                const originalContent = this.innerHTML;
+                
+                // Show loading state
+                this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
+                this.disabled = true;
+                
+                // Send AJAX request
+                fetch('add_to_library.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'book_id=' + currentBookId + '&status=want_to_read'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Response:', data);
+                    
+                    if (data.success) {
+                        // Success - update button
+                        this.innerHTML = '<i class="fas fa-check"></i> Added!';
+                        this.style.background = '#4cc9f0';
+                        this.style.borderColor = '#4cc9f0';
+                        this.style.color = 'white';
+                        
+                        // Update bookmark icon in the grid
+                        const bookCard = document.querySelector(`.book-card[data-book-id="${currentBookId}"]`);
+                        if (bookCard) {
+                            const bookmarkIcon = bookCard.querySelector('.book-action i.fa-bookmark');
+                            if (bookmarkIcon) {
+                                bookmarkIcon.style.color = '#4361ee';
+                            }
+                        }
+                        
+                        alert('Book added to your library!');
+                        
+                        // Reset button after 2 seconds
+                        setTimeout(() => {
+                            this.innerHTML = originalContent;
+                            this.style.background = '';
+                            this.style.borderColor = '';
+                            this.style.color = '';
+                            this.disabled = false;
+                        }, 2000);
+                    } else {
+                        alert('Error: ' + data.message);
+                        this.innerHTML = originalContent;
+                        this.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    console.error('Fetch Error:', error);
+                    alert('Failed to connect to server');
+                    this.innerHTML = originalContent;
+                    this.disabled = false;
+                });
+            });
+        }
+        
+        // Close modal
         closeModalBtn.addEventListener('click', () => {
             modal.classList.remove('active');
             document.body.style.overflow = 'auto';
         });
         
-        // Close modal when clicking outside
         modal.addEventListener('click', (e) => {
             if (e.target === modal) {
                 modal.classList.remove('active');
@@ -1380,7 +1484,6 @@ function e($s) {
             }
         });
         
-        // Close modal with Escape key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && modal.classList.contains('active')) {
                 modal.classList.remove('active');
@@ -1388,25 +1491,54 @@ function e($s) {
             }
         });
         
-        // Demo: Change book status on click in modal
-        const statusElement = document.getElementById('modal-status');
-        statusElement.addEventListener('click', () => {
-            if (statusElement.classList.contains('status-available')) {
-                statusElement.classList.remove('status-available');
-                statusElement.classList.add('status-borrowed');
-                statusElement.textContent = 'Borrowed';
-            } else if (statusElement.classList.contains('status-borrowed')) {
-                statusElement.classList.remove('status-borrowed');
-                statusElement.classList.add('status-reserved');
-                statusElement.textContent = 'Reserved';
-            } else {
-                statusElement.classList.remove('status-reserved');
-                statusElement.classList.add('status-available');
-                statusElement.textContent = 'Available';
-            }
+        // Book action buttons in grid
+        document.querySelectorAll('.book-action').forEach(button => {
+            button.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const icon = this.querySelector('i');
+                const action = icon.className;
+                const bookCard = this.closest('.book-card');
+                const bookTitle = bookCard.querySelector('.book-title').textContent;
+                const bookId = bookCard.getAttribute('data-book-id');
+                
+                if (action.includes('fa-bookmark')) {
+                    // Handle bookmark click
+                    const originalClass = icon.className;
+                    icon.className = 'fas fa-spinner fa-spin';
+                    
+                    fetch('add_to_library.php', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: 'book_id=' + bookId + '&status=want_to_read'
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            icon.className = 'fas fa-bookmark';
+                            icon.style.color = '#4361ee';
+                            alert(`"${bookTitle}" added to your library!`);
+                        } else {
+                            icon.className = originalClass;
+                            alert('Error: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        icon.className = originalClass;
+                        alert('Failed to add book to library');
+                    });
+                    
+                } else if (action.includes('fa-share-alt')) {
+                    alert(`Sharing "${bookTitle}"`);
+                } else if (action.includes('fa-eye')) {
+                    openBookModal(bookId);
+                }
+            });
         });
 
-        // Other functionality from the catalog
+        // View toggle buttons
         document.querySelectorAll('.view-toggle button').forEach(button => {
             button.addEventListener('click', function() {
                 document.querySelectorAll('.view-toggle button').forEach(btn => {
@@ -1416,28 +1548,11 @@ function e($s) {
             });
         });
         
-        document.querySelector('.filter-btn').addEventListener('click', function() {
+        document.querySelector('.filter-btn')?.addEventListener('click', function() {
             alert('Filter options would appear here in a real application');
         });
         
-        document.querySelector('.sort-select').addEventListener('click', function() {
+        document.querySelector('.sort-select')?.addEventListener('click', function() {
             alert('Sort options would appear here in a real application');
         });
-        
-        // Book action buttons in grid
-        document.querySelectorAll('.book-action').forEach(button => {
-            button.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const action = this.querySelector('i').className;
-                const bookTitle = this.closest('.book-card').querySelector('.book-title').textContent;
-                
-                if (action.includes('fa-bookmark')) {
-                    alert(`"${bookTitle}" added to your library`);
-                } else if (action.includes('fa-share-alt')) {
-                    alert(`Sharing "${bookTitle}"`);
-                }
-            });
-        });
     </script>
-</body>
-</html>

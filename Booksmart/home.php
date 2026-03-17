@@ -1359,7 +1359,7 @@ if (isset($conn) && $conn) {
         </div>
     </section>
      <script>
-        const booksData = <?php
+    const booksData = <?php
     $__books_map = [];
     foreach ($books as $__b) {
         if (empty($__b['book_id'])) continue;
@@ -1376,6 +1376,9 @@ if (isset($conn) && $conn) {
     echo json_encode($__books_map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
 ?>;
 
+// Global variable to track current book in modal
+let currentBookId = null;
+
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Initializing book modal...');
@@ -1384,10 +1387,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const closeModalBtn = document.getElementById('close-modal');
     const readPdfBtn = document.getElementById('read-pdf');
     
+    // Get the Add to Library button
+    const addToLibraryBtn = document.querySelector('.modal-actions .action-btn.secondary');
+    
     // Debug log to check if elements exist
     console.log('Book modal found:', !!modal);
     console.log('Close button found:', !!closeModalBtn);
     console.log('Read PDF button found:', !!readPdfBtn);
+    console.log('Add to Library button found:', !!addToLibraryBtn);
     
     // Only proceed if modal exists
     if (!modal) {
@@ -1424,6 +1431,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     function openBookModal(bookId) {
+        currentBookId = bookId; // Set the current book ID
         const book = booksData[bookId];
         if (book) {
             document.getElementById('modal-cover').src = book.cover_url;
@@ -1431,6 +1439,16 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('modal-author').textContent = `by ${book.author}`;
             document.getElementById('modal-description').textContent = book.description;
             document.querySelector('.rating-value').textContent = book.rating;
+            
+            // Reset the Add to Library button
+            if (addToLibraryBtn) {
+                addToLibraryBtn.innerHTML = '<i class="fas fa-bookmark"></i> Add to Library';
+                addToLibraryBtn.style.background = '';
+                addToLibraryBtn.style.borderColor = '';
+                addToLibraryBtn.style.color = '';
+                addToLibraryBtn.disabled = false;
+            }
+            
             const statusElement = document.getElementById('modal-status');
             statusElement.textContent = book.status.charAt(0).toUpperCase() + book.status.slice(1);
             statusElement.className = '';
@@ -1446,6 +1464,80 @@ document.addEventListener('DOMContentLoaded', function() {
             modal.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
+    }
+    
+    // Add to Library button functionality
+    if (addToLibraryBtn) {
+        addToLibraryBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('Add to Library clicked');
+            console.log('Current book ID:', currentBookId);
+            
+            if (!currentBookId) {
+                alert('No book selected');
+                return;
+            }
+            
+            // Store original button content
+            const originalContent = this.innerHTML;
+            
+            // Show loading state
+            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
+            this.disabled = true;
+            
+            // Send AJAX request
+            fetch('add_to_library.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'book_id=' + currentBookId + '&status=want_to_read'
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Response:', data);
+                
+                if (data.success) {
+                    // Success - update button
+                    this.innerHTML = '<i class="fas fa-check"></i> Added!';
+                    this.style.background = '#4cc9f0';
+                    this.style.borderColor = '#4cc9f0';
+                    this.style.color = 'white';
+                    
+                    // Update bookmark icon in the grid if it exists
+                    const bookCard = document.querySelector(`.book-card[data-book-id="${currentBookId}"]`);
+                    if (bookCard) {
+                        const bookmarkIcon = bookCard.querySelector('.book-action i.fa-bookmark');
+                        if (bookmarkIcon) {
+                            bookmarkIcon.style.color = '#4361ee';
+                        }
+                    }
+                    
+                    alert('Book added to your library!');
+                    
+                    // Reset button after 2 seconds
+                    setTimeout(() => {
+                        this.innerHTML = originalContent;
+                        this.style.background = '';
+                        this.style.borderColor = '';
+                        this.style.color = '';
+                        this.disabled = false;
+                    }, 2000);
+                } else {
+                    alert('Error: ' + data.message);
+                    this.innerHTML = originalContent;
+                    this.disabled = false;
+                }
+            })
+            .catch(error => {
+                console.error('Fetch Error:', error);
+                alert('Failed to connect to server');
+                this.innerHTML = originalContent;
+                this.disabled = false;
+            });
+        });
     }
     
     // Close modal handlers
@@ -1470,14 +1562,45 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Bookmark and share buttons
+    // Bookmark buttons in grid
     document.querySelectorAll('.book-action').forEach(button => {
         button.addEventListener('click', function(e) {
             e.stopPropagation();
-            const action = this.querySelector('i').className;
-            const bookTitle = this.closest('.book-card').querySelector('.book-title').textContent;
+            const icon = this.querySelector('i');
+            const action = icon.className;
+            const bookCard = this.closest('.book-card');
+            const bookTitle = bookCard.querySelector('.book-title').textContent;
+            const bookId = bookCard.getAttribute('data-book-id');
+            
             if (action.includes('fa-bookmark')) {
-                alert(`"${bookTitle}" added to your library`);
+                // Handle bookmark click
+                const originalClass = icon.className;
+                icon.className = 'fas fa-spinner fa-spin';
+                
+                fetch('add_to_library.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'book_id=' + bookId + '&status=want_to_read'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        icon.className = 'fas fa-bookmark';
+                        icon.style.color = '#4361ee';
+                        alert(`"${bookTitle}" added to your library!`);
+                    } else {
+                        icon.className = originalClass;
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    icon.className = originalClass;
+                    alert('Failed to add book to library');
+                });
+                
             } else if (action.includes('fa-share-alt')) {
                 alert(`Sharing "${bookTitle}"`);
             }
@@ -1486,7 +1609,43 @@ document.addEventListener('DOMContentLoaded', function() {
     
     console.log('Book modal initialized successfully');
 });
-     </script>
+
+// Profile modal functionality (keeping your existing code)
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initializing profile modal...');
+    
+    const profileModal = document.getElementById('profileModal');
+    const openEdit = document.getElementById('openEditProfile');
+    const closeBtn = document.getElementById('closeProfile');
+    
+    console.log('Profile modal found:', !!profileModal);
+    console.log('Open edit button found:', !!openEdit);
+    console.log('Close button found:', !!closeBtn);
+    
+    if (openEdit && profileModal) {
+        openEdit.addEventListener('click', function(e) {
+            e.preventDefault();
+            profileModal.style.display = 'flex';
+        });
+    } else {
+        console.warn('Profile modal elements not found');
+    }
+
+    if (closeBtn && profileModal) {
+        closeBtn.addEventListener('click', function() {
+            profileModal.style.display = 'none';
+        });
+    }
+
+    window.addEventListener('click', function(event) {
+        if (profileModal && event.target === profileModal) {
+            profileModal.style.display = 'none';
+        }
+    });
+    
+    console.log('Profile modal initialized successfully');
+});
+</script>
 
     <!-- Categories -->
     <section class="categories">

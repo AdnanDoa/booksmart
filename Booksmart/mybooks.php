@@ -31,7 +31,7 @@ $avatar_url = (!empty($user_data['avatar_url'])) ? $user_data['avatar_url'] : 'h
 $user_books = [];
 $library_stmt = $conn->prepare("
     SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url, 
-           ul.status, ul.last_opened, ul.progress
+           ul.status, ul.last_opened, ul.progress, ul.date_added
     FROM books b
     JOIN user_library ul ON b.book_id = ul.book_id
     JOIN book_files bf ON b.book_id = bf.book_id 
@@ -1437,28 +1437,18 @@ function e($s) {
             };
         <?php endforeach; ?>
 
-        // Modal functionality
+        // Global variable to track current book in modal (DECLARED ONCE)
+        let currentBookId = null;
+
+        // Modal elements
         const modal = document.getElementById('book-modal');
         const closeModalBtn = document.getElementById('close-modal');
         const readPdfBtn = document.getElementById('read-pdf');
-        const updateStatusBtn = document.getElementById('update-status');
         const removeBookBtn = document.getElementById('remove-book');
         const progressSlider = document.getElementById('progress-slider');
         const progressValue = document.getElementById('progress-value');
-        let currentBookId = null;
         
-        // Open modal when clicking on book cards or view details buttons
-        document.querySelectorAll('.book-card, .view-details').forEach(element => {
-            element.addEventListener('click', (e) => {
-                if (e.target.closest('.book-action') && !e.target.closest('.view-details')) {
-                    return;
-                }
-                
-                const bookId = e.target.closest('.book-card').getAttribute('data-book-id');
-                openBookModal(bookId);
-            });
-        });
-        
+        // Open modal function
         function openBookModal(bookId) {
             currentBookId = bookId;
             const book = booksData[bookId];
@@ -1492,8 +1482,10 @@ function e($s) {
                 statusElement.textContent = statusText;
                 
                 // Update progress
-                progressSlider.value = book.progress;
-                progressValue.textContent = book.progress + '%';
+                if (progressSlider) {
+                    progressSlider.value = book.progress;
+                    progressValue.textContent = book.progress + '%';
+                }
                 
                 // Set PDF button
                 readPdfBtn.onclick = function() {
@@ -1505,6 +1497,18 @@ function e($s) {
             }
         }
         
+        // Open modal when clicking on book cards or view details buttons
+        document.querySelectorAll('.book-card, .view-details').forEach(element => {
+            element.addEventListener('click', (e) => {
+                if (e.target.closest('.book-action') && !e.target.closest('.view-details')) {
+                    return;
+                }
+                
+                const bookId = e.target.closest('.book-card').getAttribute('data-book-id');
+                openBookModal(bookId);
+            });
+        });
+        
         // Progress slider update
         if (progressSlider) {
             progressSlider.addEventListener('input', function() {
@@ -1514,15 +1518,6 @@ function e($s) {
             progressSlider.addEventListener('change', function() {
                 if (currentBookId) {
                     updateProgress(currentBookId, this.value);
-                }
-            });
-        }
-        
-        // Update status button
-        if (updateStatusBtn) {
-            updateStatusBtn.addEventListener('click', function() {
-                if (currentBookId) {
-                    updateBookStatus(currentBookId);
                 }
             });
         }
@@ -1570,7 +1565,7 @@ function e($s) {
         function filterBooks(filter) {
             const books = document.querySelectorAll('.book-card');
             books.forEach(book => {
-                if (filter === 'all') {
+                if (filter === 'all' || filter === '') {
                     book.style.display = 'flex';
                 } else {
                     const status = book.dataset.status;
@@ -1580,10 +1575,13 @@ function e($s) {
         }
         
         // Sort functionality
-        document.getElementById('sort-books').addEventListener('change', function() {
-            const sortBy = this.value;
-            sortBooks(sortBy);
-        });
+        const sortSelect = document.getElementById('sort-books');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', function() {
+                const sortBy = this.value;
+                sortBooks(sortBy);
+            });
+        }
         
         function sortBooks(sortBy) {
             const grid = document.getElementById('books-grid');
@@ -1592,13 +1590,13 @@ function e($s) {
             books.sort((a, b) => {
                 switch(sortBy) {
                     case 'recent':
-                        return new Date(b.dataset.date) - new Date(a.dataset.date);
+                        return new Date(b.dataset.date || 0) - new Date(a.dataset.date || 0);
                     case 'title':
-                        return a.dataset.title.localeCompare(b.dataset.title);
+                        return (a.dataset.title || '').localeCompare(b.dataset.title || '');
                     case 'author':
-                        return a.dataset.author.localeCompare(b.dataset.author);
+                        return (a.dataset.author || '').localeCompare(b.dataset.author || '');
                     case 'progress':
-                        return b.dataset.progress - a.dataset.progress;
+                        return (parseInt(b.dataset.progress) || 0) - (parseInt(a.dataset.progress) || 0);
                     default:
                         return 0;
                 }
@@ -1608,21 +1606,24 @@ function e($s) {
         }
         
         // Search functionality
-        document.querySelector('.search-bar input').addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase();
-            const books = document.querySelectorAll('.book-card');
-            
-            books.forEach(book => {
-                const title = book.dataset.title;
-                const author = book.dataset.author;
+        const searchInput = document.querySelector('.search-bar input');
+        if (searchInput) {
+            searchInput.addEventListener('input', function() {
+                const searchTerm = this.value.toLowerCase();
+                const books = document.querySelectorAll('.book-card');
                 
-                if (title.includes(searchTerm) || author.includes(searchTerm)) {
-                    book.style.display = 'flex';
-                } else {
-                    book.style.display = 'none';
-                }
+                books.forEach(book => {
+                    const title = (book.dataset.title || '').toLowerCase();
+                    const author = (book.dataset.author || '').toLowerCase();
+                    
+                    if (title.includes(searchTerm) || author.includes(searchTerm)) {
+                        book.style.display = 'flex';
+                    } else {
+                        book.style.display = 'none';
+                    }
+                });
             });
-        });
+        }
         
         // AJAX Functions
         function updateProgress(bookId, progress) {
@@ -1640,7 +1641,9 @@ function e($s) {
                     const bookCard = document.querySelector(`.book-card[data-book-id="${bookId}"]`);
                     if (bookCard) {
                         const progressFill = bookCard.querySelector('.progress-fill');
-                        progressFill.style.width = progress + '%';
+                        if (progressFill) {
+                            progressFill.style.width = progress + '%';
+                        }
                         bookCard.dataset.progress = progress;
                     }
                     
@@ -1653,11 +1656,25 @@ function e($s) {
             .catch(error => console.error('Error:', error));
         }
         
+        // Update status function (called by the button)
         function updateBookStatus(bookId) {
             const statuses = ['reading', 'completed', 'want_to_read'];
             const currentStatus = booksData[bookId].status;
             const currentIndex = statuses.indexOf(currentStatus);
             const nextStatus = statuses[(currentIndex + 1) % statuses.length];
+            
+            let statusText = '';
+            switch(nextStatus) {
+                case 'reading':
+                    statusText = 'Currently Reading';
+                    break;
+                case 'completed':
+                    statusText = 'Completed';
+                    break;
+                case 'want_to_read':
+                    statusText = 'Want to Read';
+                    break;
+            }
             
             fetch('update_status.php', {
                 method: 'POST',
@@ -1674,45 +1691,57 @@ function e($s) {
                     if (bookCard) {
                         bookCard.dataset.status = nextStatus;
                         const statusSpan = bookCard.querySelector('.book-status');
-                        statusSpan.className = `book-status status-${nextStatus}`;
-                        
-                        let statusText = '';
-                        switch(nextStatus) {
-                            case 'reading':
-                                statusText = 'Reading';
-                                break;
-                            case 'completed':
-                                statusText = 'Completed';
-                                break;
-                            case 'want_to_read':
-                                statusText = 'Want to Read';
-                                break;
+                        if (statusSpan) {
+                            statusSpan.className = `book-status status-${nextStatus}`;
+                            statusSpan.textContent = statusText.replace('Currently ', '');
                         }
-                        statusSpan.textContent = statusText;
                     }
                     
-                    // Update modal
-                    const modalStatus = document.getElementById('modal-status');
-                    modalStatus.className = `status-${nextStatus}`;
-                    
-                    switch(nextStatus) {
-                        case 'reading':
-                            modalStatus.textContent = 'Currently Reading';
-                            break;
-                        case 'completed':
-                            modalStatus.textContent = 'Completed';
-                            break;
-                        case 'want_to_read':
-                            modalStatus.textContent = 'Want to Read';
-                            break;
+                    // Update modal if open
+                    if (currentBookId == bookId) {
+                        const modalStatus = document.getElementById('modal-status');
+                        if (modalStatus) {
+                            modalStatus.className = `status-${nextStatus}`;
+                            modalStatus.textContent = statusText;
+                        }
                     }
                     
                     // Update booksData
                     booksData[bookId].status = nextStatus;
+                    
+                    alert(`Status updated to: ${statusText}`);
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to update status'));
                 }
             })
-            .catch(error => console.error('Error:', error));
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to connect to server');
+            });
         }
+        
+        // Set up the Update Status button
+        document.addEventListener('DOMContentLoaded', function() {
+            const updateStatusBtn = document.getElementById('update-status');
+            if (updateStatusBtn) {
+                updateStatusBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    if (!currentBookId) {
+                        alert('No book selected');
+                        return;
+                    }
+                    
+                    if (!booksData[currentBookId]) {
+                        alert('Book data not found');
+                        return;
+                    }
+                    
+                    updateBookStatus(currentBookId);
+                });
+            }
+        });
         
         function removeFromLibrary(bookId, event) {
             if (event) {
@@ -1754,16 +1783,24 @@ function e($s) {
             .catch(error => console.error('Error:', error));
         }
 
-        // Handle bookmark and share buttons
+        // Handle bookmark and other buttons
         document.querySelectorAll('.book-action:not(.view-details):not(.delete)').forEach(button => {
             button.addEventListener('click', function(e) {
                 e.stopPropagation();
-                const action = this.querySelector('i').className;
-                const bookTitle = this.closest('.book-card').querySelector('.book-title').textContent;
+                const icon = this.querySelector('i');
+                if (!icon) return;
                 
-                if (action.includes('fa-pen')) {
-                    const bookId = this.closest('.book-card').dataset.bookId;
-                    openBookModal(bookId);
+                const action = icon.className;
+                const bookCard = this.closest('.book-card');
+                if (!bookCard) return;
+                
+                const bookTitle = bookCard.querySelector('.book-title')?.textContent || 'Book';
+                
+                if (action.includes('fa-pen') || action.includes('fa-edit')) {
+                    const bookId = bookCard.dataset.bookId;
+                    if (bookId) openBookModal(bookId);
+                } else if (action.includes('fa-share-alt')) {
+                    alert(`Sharing "${bookTitle}"`);
                 }
             });
         });
