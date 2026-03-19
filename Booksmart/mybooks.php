@@ -1143,9 +1143,9 @@ function e($s) {
         <nav class="nav-links">
             <a href="home.php">Home</a>
             <a href="catalog.php">Catalog</a>
-            <a href="#" class="active">My Books</a>
-            <a href="#">Reviews</a>
-            <a href="#">Community</a>
+            <a href="mybooks.php" class="active">My Books</a>
+            <a href="reviews.php">Reviews</a>
+            <a href="challenge.php">Challenge</a>
         </nav>
         
         <div class="header-actions">
@@ -1387,9 +1387,9 @@ function e($s) {
                 <ul class="footer-links">
                     <li><a href="home.php">Home</a></li>
                     <li><a href="catalog.php">Catalog</a></li>
-                    <li><a href="#">My Books</a></li>
-                    <li><a href="#">Reviews</a></li>
-                    <li><a href="#">Community</a></li>
+                    <li><a href="mybooks.php">My Books</a></li>
+                    <li><a href="reviews.php">Reviews</a></li>
+                    <li><a href="challenge.php">Challenge</a></li>
                 </ul>
             </div>
             

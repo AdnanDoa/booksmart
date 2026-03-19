@@ -6,6 +6,8 @@ if (!isset($_SESSION['user_id'])) {
 }
 require_once __DIR__ . '/db_connect.php';
 $uid = (int)$_SESSION['user_id'];
+
+// Get user data
 $stmt = $conn->prepare('SELECT user_id, name, email, role, subscription_type, avatar_url, bio, created_at FROM users WHERE user_id = ? LIMIT 1');
 $stmt->bind_param('i', $uid);
 $stmt->execute();
@@ -16,6 +18,66 @@ if (!$user) {
     exit;
 }
 if (empty($user['avatar_url'])) $user['avatar_url'] = 'https://i.pravatar.cc/150?img=32';
+
+// Get reading stats from user_library
+$stats = [];
+
+// Total books in library
+$total_library = $conn->query("SELECT COUNT(*) as count FROM user_library WHERE user_id = $uid")->fetch_assoc()['count'];
+
+// Books by status
+$reading = $conn->query("SELECT COUNT(*) as count FROM user_library WHERE user_id = $uid AND status = 'reading'")->fetch_assoc()['count'];
+$completed = $conn->query("SELECT COUNT(*) as count FROM user_library WHERE user_id = $uid AND status = 'completed'")->fetch_assoc()['count'];
+$wishlist = $conn->query("SELECT COUNT(*) as count FROM user_library WHERE user_id = $uid AND status = 'wishlist'")->fetch_assoc()['count'];
+$purchased = $conn->query("SELECT COUNT(*) as count FROM user_library WHERE user_id = $uid AND status = 'purchased'")->fetch_assoc()['count'];
+
+// Get currently reading books with progress
+$currently_reading = [];
+$reading_query = "SELECT ul.*, b.title, b.author, b.cover_url 
+                  FROM user_library ul 
+                  JOIN books b ON ul.book_id = b.book_id 
+                  WHERE ul.user_id = $uid AND ul.status = 'reading' 
+                  ORDER BY ul.last_opened DESC 
+                  LIMIT 5";
+$reading_res = $conn->query($reading_query);
+if ($reading_res) {
+    while ($row = $reading_res->fetch_assoc()) {
+        $currently_reading[] = $row;
+    }
+}
+
+// Get user's library books (for bookshelf)
+$library_books = [];
+$library_query = "SELECT ul.*, b.title, b.author, b.cover_url 
+                  FROM user_library ul 
+                  JOIN books b ON ul.book_id = b.book_id 
+                  WHERE ul.user_id = $uid 
+                  ORDER BY ul.last_opened DESC 
+                  LIMIT 12";
+$library_res = $conn->query($library_query);
+if ($library_res) {
+    while ($row = $library_res->fetch_assoc()) {
+        $library_books[] = $row;
+    }
+}
+
+// Get user's reviews count
+$reviews_count = $conn->query("SELECT COUNT(*) as count FROM reviews WHERE user_id = $uid")->fetch_assoc()['count'];
+
+// Get average rating from user's reviews
+$avg_rating = $conn->query("SELECT AVG(rating) as avg FROM reviews WHERE user_id = $uid")->fetch_assoc()['avg'];
+$avg_rating = $avg_rating ? number_format($avg_rating, 1) : '0.0';
+
+// Get total reading time (estimated - 30min per 10% progress)
+$total_progress = $conn->query("SELECT SUM(progress) as total FROM user_library WHERE user_id = $uid")->fetch_assoc()['total'];
+$reading_hours = $total_progress ? round(($total_progress / 10) * 0.5) : 0;
+
+// Get member since date
+$member_since = date('F j, Y', strtotime($user['created_at']));
+
+function e($s) { 
+    return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); 
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -33,6 +95,7 @@ if (empty($user['avatar_url'])) $user['avatar_url'] = 'https://i.pravatar.cc/150
   --dark: #212529;
   --gray: #6c757d;
   --success: #4cc9f0;
+  --warning: #ff9e00;
   --border-radius: 12px;
   --box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
   --transition: all 0.3s ease;
@@ -200,13 +263,31 @@ header .search-bar input:focus {
 
 .profile-username {
     color: var(--gray);
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.member-since {
+    color: var(--gray);
+    font-size: 13px;
     margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+
+.member-since i {
+    color: var(--primary);
 }
 
 .profile-stats {
     display: flex;
     justify-content: space-around;
     margin: 25px 0;
+    padding: 15px 0;
+    border-top: 1px solid #f0f2f5;
+    border-bottom: 1px solid #f0f2f5;
 }
 
 .stat {
@@ -222,6 +303,14 @@ header .search-bar input:focus {
 .stat-label {
     font-size: 14px;
     color: var(--gray);
+}
+
+.profile-bio {
+    color: var(--dark);
+    line-height: 1.6;
+    margin-bottom: 20px;
+    padding: 0 10px;
+    font-style: italic;
 }
 
 .edit-profile-btn {
@@ -265,6 +354,13 @@ header .search-bar input:focus {
     margin-bottom: 20px;
     padding-bottom: 10px;
     border-bottom: 2px solid #f0f2f5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.section-title i {
+    color: var(--primary);
 }
 
 /* Currently Reading */
@@ -273,6 +369,22 @@ header .search-bar input:focus {
     gap: 20px;
     overflow-x: auto;
     padding: 10px 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary) #f0f2f5;
+}
+
+.currently-reading::-webkit-scrollbar {
+    height: 6px;
+}
+
+.currently-reading::-webkit-scrollbar-track {
+    background: #f0f2f5;
+    border-radius: 10px;
+}
+
+.currently-reading::-webkit-scrollbar-thumb {
+    background: var(--primary);
+    border-radius: 10px;
 }
 
 .reading-book {
@@ -300,19 +412,25 @@ header .search-bar input:focus {
     font-size: 16px;
     font-weight: 600;
     color: var(--dark);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .reading-book p {
     margin: 0;
     color: var(--gray);
     font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .progress-bar {
     height: 6px;
     background: #f0f2f5;
     border-radius: 3px;
-    margin: 10px 0;
+    margin: 10px 0 5px;
     overflow: hidden;
 }
 
@@ -320,6 +438,28 @@ header .search-bar input:focus {
     height: 100%;
     background: linear-gradient(to right, var(--primary), var(--secondary));
     border-radius: 3px;
+}
+
+.progress-text {
+    font-size: 12px;
+    color: var(--gray);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--gray);
+    width: 100%;
+}
+
+.empty-state i {
+    font-size: 48px;
+    margin-bottom: 15px;
+    color: #ddd;
+}
+
+.empty-state p {
+    font-size: 16px;
 }
 
 /* Reading Stats */
@@ -372,6 +512,7 @@ header .search-bar input:focus {
 .book-item {
     text-align: center;
     transition: var(--transition);
+    cursor: pointer;
 }
 
 .book-item:hover {
@@ -391,12 +532,47 @@ header .search-bar input:focus {
     font-size: 16px;
     font-weight: 600;
     color: var(--dark);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .book-item p {
     margin: 0;
     color: var(--gray);
     font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.book-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 5px;
+}
+
+.badge-reading {
+    background: rgba(76, 201, 240, 0.2);
+    color: var(--success);
+}
+
+.badge-completed {
+    background: rgba(76, 201, 240, 0.2);
+    color: #2ecc71;
+}
+
+.badge-wishlist {
+    background: rgba(255, 158, 0, 0.2);
+    color: var(--warning);
+}
+
+.badge-purchased {
+    background: rgba(67, 97, 238, 0.1);
+    color: var(--primary);
 }
 
 /* Footer */
@@ -433,7 +609,7 @@ footer {
 
 .modal-header {
     display: flex;
-    justify-content: between;
+    justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
 }
@@ -571,10 +747,12 @@ footer {
     </a>
     <div class="search-bar"><input type="text" placeholder="Pretraži knjige..."></div>
     <div class="profile" id="profileBox">
-        <img id="headerAvatar" src="<?php echo htmlspecialchars($user['avatar_url']); ?>" alt="Profile">
+        <img id="headerAvatar" src="<?php echo e($user['avatar_url']); ?>" alt="Profile">
         <div class="dropdown">
-            <img id="dropdownAvatar" src="<?php echo htmlspecialchars($user['avatar_url']); ?>" alt="Account Image">
+            <img id="dropdownAvatar" src="<?php echo e($user['avatar_url']); ?>" alt="Account Image">
             <a href="profpage.php">Profil</a>
+            <a href="mybooks.php">Moja biblioteka</a>
+            <a href="reviews.php?user_id=<?php echo $uid; ?>">Moje recenzije</a>
             <a href="logout.php">Logout</a>
         </div>
     </div>
@@ -583,26 +761,31 @@ footer {
 <div class="profile-container">
     <!-- Profile Sidebar -->
     <div class="profile-sidebar">
-        <img id="profilePicture" src="<?php echo htmlspecialchars($user['avatar_url']); ?>" alt="Profile Picture" class="profile-picture">
-        <h2 id="profileName" class="profile-name"><?php echo htmlspecialchars($user['name']); ?></h2>
+        <img id="profilePicture" src="<?php echo e($user['avatar_url']); ?>" alt="Profile Picture" class="profile-picture">
+        <h2 id="profileName" class="profile-name"><?php echo e($user['name']); ?></h2>
         <p id="profileUsername" class="profile-username">@<?php echo explode('@', $user['email'])[0]; ?></p>
+        
+        <div class="member-since">
+            <i class="far fa-calendar-alt"></i>
+            <span>Član od <?php echo date('F Y', strtotime($user['created_at'])); ?></span>
+        </div>
         
         <div class="profile-stats">
             <div class="stat">
-                <div class="stat-value">127</div>
+                <div class="stat-value"><?php echo $completed; ?></div>
                 <div class="stat-label">Pročitano</div>
             </div>
             <div class="stat">
-                <div class="stat-value">23</div>
+                <div class="stat-value"><?php echo $reading; ?></div>
                 <div class="stat-label">Trenutno</div>
             </div>
             <div class="stat">
-                <div class="stat-value">42</div>
+                <div class="stat-value"><?php echo $wishlist; ?></div>
                 <div class="stat-label">Želje</div>
             </div>
         </div>
         
-        <p id="profileBio"><?php echo htmlspecialchars($user['bio'] ?? 'Meni je Ramo Isak preporučio ovu stranicu.'); ?></p>
+        <p id="profileBio" class="profile-bio"><?php echo e($user['bio'] ?? 'Meni je Ramo Isak preporučio ovu stranicu.'); ?></p>
         
         <button class="edit-profile-btn" id="openEditProfileBtn">Uredi profil</button>
     </div>
@@ -611,110 +794,113 @@ footer {
     <div class="profile-content">
         <!-- Currently Reading Section -->
         <div class="profile-section">
-            <h2 class="section-title">Trenutno čitam</h2>
+            <h2 class="section-title"><i class="fas fa-book-open"></i> Trenutno čitam</h2>
             <div class="currently-reading">
-                <div class="reading-book">
-                    <img src="https://picsum.photos/300/450?random=101" alt="Book Cover">
-                    <h4>Na Drini ćuprija</h4>
-                    <p>Ivo Andrić</p>
-                    <div class="progress-bar">
-                        <div class="progress" style="width: 65%"></div>
+                <?php if (empty($currently_reading)): ?>
+                    <div class="empty-state">
+                        <i class="fas fa-book"></i>
+                        <p>Trenutno ne čitaš nijednu knjigu.</p>
                     </div>
-                    <span>65% pročitano</span>
-                </div>
-                <div class="reading-book">
-                    <img src="https://picsum.photos/300/450?random=102" alt="Book Cover">
-                    <h4>Prokleta avlija</h4>
-                    <p>Ivo Andrić</p>
-                    <div class="progress-bar">
-                        <div class="progress" style="width: 30%"></div>
-                    </div>
-                    <span>30% pročitano</span>
-                </div>
-                <div class="reading-book">
-                    <img src="https://picsum.photos/300/450?random=103" alt="Book Cover">
-                    <h4>Gorski vijenac</h4>
-                    <p>Njegoš</p>
-                    <div class="progress-bar">
-                        <div class="progress" style="width: 15%"></div>
-                    </div>
-                    <span>15% pročitano</span>
-                </div>
+                <?php else: ?>
+                    <?php foreach ($currently_reading as $book): ?>
+                        <div class="reading-book" onclick="window.location.href='catalog.php?book_id=<?php echo $book['book_id']; ?>'">
+                            <img src="<?php echo e($book['cover_url'] ?: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f'); ?>" alt="<?php echo e($book['title']); ?>">
+                            <h4><?php echo e(strlen($book['title']) > 25 ? substr($book['title'], 0, 25) . '...' : $book['title']); ?></h4>
+                            <p><?php echo e($book['author']); ?></p>
+                            <div class="progress-bar">
+                                <div class="progress" style="width: <?php echo $book['progress']; ?>%"></div>
+                            </div>
+                            <span class="progress-text"><?php echo $book['progress']; ?>% pročitano</span>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
         </div>
         
         <!-- Reading Stats Section -->
         <div class="profile-section">
-            <h2 class="section-title">Statistika čitanja</h2>
+            <h2 class="section-title"><i class="fas fa-chart-bar"></i> Statistika čitanja</h2>
             <div class="stats-grid">
                 <div class="stat-card">
                     <i class="fas fa-book-open"></i>
-                    <h3>127</h3>
+                    <h3><?php echo $completed; ?></h3>
                     <p>Pročitane knjige</p>
                 </div>
                 <div class="stat-card">
                     <i class="fas fa-clock"></i>
-                    <h3>342</h3>
+                    <h3><?php echo $reading_hours; ?></h3>
                     <p>Sati čitanja</p>
                 </div>
                 <div class="stat-card">
-                    <i class="fas fa-trophy"></i>
-                    <h3>15</h3>
-                    <p>Izazovi završeni</p>
-                </div>
-                <div class="stat-card">
-                    <i class="fas fa-calendar-alt"></i>
-                    <h3>156</h3>
-                    <p>Dana redovnog čitanja</p>
-                </div>
-                <div class="stat-card">
                     <i class="fas fa-star"></i>
-                    <h3>4.7</h3>
+                    <h3><?php echo $avg_rating; ?></h3>
                     <p>Prosječna ocjena</p>
                 </div>
                 <div class="stat-card">
+                    <i class="fas fa-pen"></i>
+                    <h3><?php echo $reviews_count; ?></h3>
+                    <p>Recenzije</p>
+                </div>
+                <div class="stat-card">
                     <i class="fas fa-bookmark"></i>
-                    <h3>42</h3>
-                    <p>Omiljene knjige</p>
+                    <h3><?php echo $total_library; ?></h3>
+                    <p>U biblioteci</p>
+                </div>
+                <div class="stat-card">
+                    <i class="fas fa-heart"></i>
+                    <h3><?php echo $wishlist; ?></h3>
+                    <p>Na listi želja</p>
                 </div>
             </div>
         </div>
         
         <!-- Bookshelf Section -->
         <div class="profile-section">
-            <h2 class="section-title">Moja biblioteka</h2>
+            <h2 class="section-title"><i class="fas fa-books"></i> Moja biblioteka</h2>
             <div class="bookshelf">
-                <div class="book-item">
-                    <img src="https://picsum.photos/300/450?random=201" alt="Book Cover">
-                    <h4>Na Drini ćuprija</h4>
-                    <p>Ivo Andrić</p>
-                </div>
-                <div class="book-item">
-                    <img src="https://picsum.photos/300/450?random=202" alt="Book Cover">
-                    <h4>Travnička hronika</h4>
-                    <p>Ivo Andrić</p>
-                </div>
-                <div class="book-item">
-                    <img src="https://picsum.photos/300/450?random=203" alt="Book Cover">
-                    <h4>Prokleta avlija</h4>
-                    <p>Ivo Andrić</p>
-                </div>
-                <div class="book-item">
-                    <img src="https://picsum.photos/300/450?random=204" alt="Book Cover">
-                    <h4>Gorski vijenac</h4>
-                    <p>Njegoš</p>
-                </div>
-                <div class="book-item">
-                    <img src="https://picsum.photos/300/450?random=205" alt="Book Cover">
-                    <h4>Seobe</h4>
-                    <p>M. Crnjanski</p>
-                </div>
-                <div class="book-item">
-                    <img src="https://picsum.photos/300/450?random=206" alt="Book Cover">
-                    <h4>Zapisi o mome narodu</h4>
-                    <p>J. Cvijić</p>
-                </div>
+                <?php if (empty($library_books)): ?>
+                    <div class="empty-state" style="grid-column: 1/-1;">
+                        <i class="fas fa-book"></i>
+                        <p>Još nemaš knjiga u biblioteci.</p>
+                        <a href="catalog.php" style="color: var(--primary); text-decoration: none; font-weight: 600;">Pretraži katalog →</a>
+                    </div>
+                <?php else: ?>
+                    <?php foreach ($library_books as $book): ?>
+                        <div class="book-item" onclick="window.location.href='catalog.php?book_id=<?php echo $book['book_id']; ?>'">
+                            <img src="<?php echo e($book['cover_url'] ?: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f'); ?>" alt="<?php echo e($book['title']); ?>">
+                            <h4><?php echo e(strlen($book['title']) > 25 ? substr($book['title'], 0, 25) . '...' : $book['title']); ?></h4>
+                            <p><?php echo e($book['author']); ?></p>
+                            <?php
+                            $badge_class = '';
+                            $badge_text = '';
+                            switch($book['status']) {
+                                case 'reading':
+                                    $badge_class = 'badge-reading';
+                                    $badge_text = 'Čitam';
+                                    break;
+                                case 'completed':
+                                    $badge_class = 'badge-completed';
+                                    $badge_text = 'Pročitano';
+                                    break;
+                                case 'wishlist':
+                                    $badge_class = 'badge-wishlist';
+                                    $badge_text = 'Želim';
+                                    break;
+                                default:
+                                    $badge_class = 'badge-purchased';
+                                    $badge_text = 'U vlasništvu';
+                            }
+                            ?>
+                            <span class="book-badge <?php echo $badge_class; ?>"><?php echo $badge_text; ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
+            <?php if (count($library_books) >= 12): ?>
+                <div style="text-align: center; margin-top: 20px;">
+                    <a href="mybooks.php" style="color: var(--primary); text-decoration: none; font-weight: 600;">Pogledaj svih <?php echo $total_library; ?> knjiga →</a>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -730,10 +916,11 @@ footer {
             <div class="form-group">
                 <label for="avatar">Profilna slika</label>
                 <input type="file" id="avatar" name="avatar" accept="image/jpeg,image/png,image/gif">
+                <small style="color: var(--gray); display: block; margin-top: 5px;">Ostavite prazno ako ne želite mijenjati sliku.</small>
             </div>
             <div class="form-group">
                 <label for="bio">Biografija</label>
-                <textarea id="bio" name="bio" placeholder="O sebi..."><?php echo htmlspecialchars($user['bio'] ?? ''); ?></textarea>
+                <textarea id="bio" name="bio" placeholder="O sebi..."><?php echo e($user['bio'] ?? ''); ?></textarea>
             </div>
             <button type="submit" class="submit-btn">Spremi promjene</button>
         </form>
@@ -801,6 +988,7 @@ document.getElementById('editProfileForm').addEventListener('submit', function(e
             const newBio = document.getElementById('bio') ? document.getElementById('bio').value : null;
             if (bioField && newBio !== null) bioField.textContent = newBio;
             editProfileModal.style.display = 'none';
+            alert('Profil uspješno ažuriran!');
         } else {
             alert('Došlo je do greške prilikom ažuriranja profila.');
         }
@@ -810,7 +998,18 @@ document.getElementById('editProfileForm').addEventListener('submit', function(e
         alert('Došlo je do greške prilikom ažuriranja profila.');
     });
 });
+
+// Search functionality
+document.querySelector('.search-bar input').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        const query = this.value.trim();
+        if (query) {
+            window.location.href = 'catalog.php?search=' + encodeURIComponent(query);
+        }
+    }
+});
 </script>
 
 </body>
 </html>
+<?php $conn->close(); ?>

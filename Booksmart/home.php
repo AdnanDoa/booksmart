@@ -1278,8 +1278,8 @@ if (isset($conn) && $conn) {
             <a href="home.php" class="active">Home</a>
             <a href="catalog.php">Catalog</a>
             <a href="mybooks.php">My Books</a>
-            <a href="#">Reviews</a>
-            <a href="#">Community</a>
+            <a href="reviews.php">Reviews</a>
+            <a href="challenge.php">Challenge</a>
         </nav>
         
         <div class="header-actions">
@@ -1310,7 +1310,6 @@ if (isset($conn) && $conn) {
             <p>Explore thousands of books, track your reading, and connect with fellow book lovers in our vibrant community.</p>
             <div class="hero-buttons">
                 <a href="catalog.php" class="btn btn-primary">Explore Catalog</a>
-                <a href="#" class="btn btn-secondary">Join Community</a>
             </div>
         </div>
         <div class="hero-image">
@@ -1774,9 +1773,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 <ul class="footer-links">
                     <li><a href="home.php">Home</a></li>
                     <li><a href="catalog.php">Catalog</a></li>
-                    <li><a href="#">My Books</a></li>
-                    <li><a href="#">Reviews</a></li>
-                    <li><a href="#">Community</a></li>
+                    <li><a href="mybooks.php">My Books</a></li>
+                    <li><a href="reviews.php">Reviews</a></li>
+                    <li><a href="challenge.php">Reading Challenge</a></li>
                 </ul>
             </div>
             

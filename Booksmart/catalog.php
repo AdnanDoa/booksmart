@@ -1087,10 +1087,10 @@ function e($s) {
         
         <nav class="nav-links">
             <a href="home.php">Home</a>
-            <a href="#" class="active">Catalog</a>
+            <a href="catalog.php" class="active">Catalog</a>
             <a href="mybooks.php">My Books</a>
-            <a href="#">Reviews</a>
-            <a href="#">Community</a>
+            <a href="reviews.php">Reviews</a>
+            <a href="challenge.php">Challenge</a>
         </nav>
         
         <div class="header-actions">
@@ -1193,10 +1193,10 @@ function e($s) {
                 <h3>Explore</h3>
                 <ul class="footer-links">
                     <li><a href="home.php">Home</a></li>
-                    <li><a href="#">Catalog</a></li>
-                    <li><a href="#">My Books</a></li>
-                    <li><a href="#">Reviews</a></li>
-                    <li><a href="#">Community</a></li>
+                    <li><a href="catalog.php">Catalog</a></li>
+                    <li><a href="mybooks.php">My Books</a></li>
+                    <li><a href="reviews.php">Reviews</a></li>
+                    <li><a href="challenge.php">Challenge</a></li>
                 </ul>
             </div>
             
@@ -1225,8 +1225,7 @@ function e($s) {
             <p>&copy; 2023 Booksmart. All rights reserved.</p>
         </div>
     </footer>
-
- <!-- Book Details Modal -->
+<!-- Book Details Modal -->
 <div id="book-modal">
     <div class="modal-content">
         <button class="modal-close" id="close-modal">
@@ -1256,15 +1255,6 @@ function e($s) {
                 </div>
                 
                 <span id="modal-status" class="status-reading">Currently Reading</span>
-                
-                <!-- PROGRESS BAR SECTION - THIS WAS MISSING -->
-                <div class="modal-progress">
-                    <div class="progress-header">
-                        <span>Reading Progress</span>
-                        <span id="progress-value">0%</span>
-                    </div>
-                    <input type="range" id="progress-slider" class="progress-slider" min="0" max="100" value="0">
-                </div>
                 
                 <p class="modal-description" id="modal-description">
                     Book description will appear here...
@@ -1296,12 +1286,86 @@ function e($s) {
                     <button class="action-btn secondary" id="update-status">
                         <i class="fas fa-sync-alt"></i> Update Status
                     </button>
+                    <button class="action-btn secondary" id="view-reviews-btn">
+                        <i class="fas fa-star"></i> Reviews
+                    </button>
                     <button class="action-btn danger" id="remove-book">
                         <i class="fas fa-trash"></i> Remove
                     </button>
                 </div>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Review Modal -->
+<div id="review-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000; align-items: center; justify-content: center;">
+    <div style="background: white; border-radius: 20px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; padding: 30px; position: relative;">
+        <button class="modal-close" onclick="closeReviewModal()" style="position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+        
+        <h2 style="font-family: 'Playfair Display', serif; margin-bottom: 20px;">Write a Review</h2>
+        
+        <div id="review-book-info" style="display: flex; gap: 15px; margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid var(--light-gray);">
+            <img id="review-book-cover" src="" alt="Book Cover" style="width: 60px; height: 80px; object-fit: cover; border-radius: 8px;">
+            <div>
+                <h3 id="review-book-title" style="font-weight: 600; margin-bottom: 5px;"></h3>
+                <p id="review-book-author" style="color: var(--gray);"></p>
+            </div>
+        </div>
+        
+        <form id="review-form">
+            <input type="hidden" id="review-book-id" name="book_id">
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px; font-weight: 600;">Your Rating</label>
+                <div class="star-rating" style="font-size: 30px; color: #ffc107; cursor: pointer;">
+                    <i class="far fa-star" data-rating="1"></i>
+                    <i class="far fa-star" data-rating="2"></i>
+                    <i class="far fa-star" data-rating="3"></i>
+                    <i class="far fa-star" data-rating="4"></i>
+                    <i class="far fa-star" data-rating="5"></i>
+                </div>
+                <input type="hidden" id="rating-input" name="rating" value="0">
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px; font-weight: 600;">Your Review</label>
+                <textarea id="review-comment" name="comment" rows="5" style="width: 100%; padding: 15px; border: 1px solid var(--light-gray); border-radius: 12px; font-family: inherit; resize: vertical;" placeholder="Share your thoughts about this book..."></textarea>
+            </div>
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" onclick="closeReviewModal()" style="padding: 12px 25px; border: 1px solid var(--light-gray); background: white; border-radius: 30px; cursor: pointer;">Cancel</button>
+                <button type="submit" style="padding: 12px 30px; background: var(--primary); color: white; border: none; border-radius: 30px; cursor: pointer; font-weight: 600;">Submit Review</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Reviews List Modal -->
+<div id="reviews-list-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000; align-items: center; justify-content: center;">
+    <div style="background: white; border-radius: 20px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; padding: 30px; position: relative;">
+        <button class="modal-close" onclick="closeReviewsListModal()" style="position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+        
+        <h2 style="font-family: 'Playfair Display', serif; margin-bottom: 20px;">Reviews</h2>
+        
+        <div id="reviews-summary" style="display: flex; align-items: center; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--light-gray); margin-bottom: 20px;">
+            <div style="text-align: center;">
+                <span id="reviews-average" style="font-size: 48px; font-weight: 700; color: var(--primary);">0.0</span>
+                <span style="color: var(--gray);">/5.0</span>
+            </div>
+            <div>
+                <div id="reviews-stars" style="color: #ffc107; font-size: 20px; margin-bottom: 5px;"></div>
+                <span id="reviews-count" style="color: var(--gray);">0 reviews</span>
+            </div>
+        </div>
+        
+        <div id="reviews-container" style="margin-bottom: 20px;">
+            <!-- Reviews will be loaded here -->
+        </div>
+        
+        <button id="write-review-btn" onclick="openReviewModal()" style="width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 30px; font-weight: 600; cursor: pointer; margin-top: 20px;">
+            <i class="fas fa-pen"></i> Write a Review
+        </button>
     </div>
 </div>
 <script>
@@ -1322,7 +1386,35 @@ function e($s) {
 
         // Global variable to track current book in modal
         let currentBookId = null;
-
+// Debug - check if button exists
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM fully loaded');
+    
+    const reviewBtn = document.getElementById('view-reviews-btn');
+    console.log('Reviews button found:', reviewBtn);
+    
+    if (reviewBtn) {
+        console.log('Button exists, adding click listener');
+        reviewBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Reviews button clicked manually');
+            console.log('Current book ID:', currentBookId);
+            
+            if (currentBookId) {
+                openReviewsListModal(currentBookId);
+            } else {
+                alert('No book selected');
+            }
+        });
+    } else {
+        console.log('Button NOT found - check if ID is correct');
+    }
+    
+    // Also check if modals exist
+    console.log('Review modal exists:', document.getElementById('review-modal'));
+    console.log('Reviews list modal exists:', document.getElementById('reviews-list-modal'));
+});
         // Modal functionality
         const modal = document.getElementById('book-modal');
         const closeModalBtn = document.getElementById('close-modal');
@@ -1332,48 +1424,51 @@ function e($s) {
         const addToLibraryBtn = document.querySelector('.modal-actions .action-btn.secondary');
         
         // Open modal function
-        function openBookModal(bookId) {
-            console.log('Opening modal for book ID:', bookId);
-            currentBookId = bookId;
-            
-            const book = booksData[bookId];
-            
-            if (book) {
-                // Update modal content
-                document.getElementById('modal-cover').src = book.cover_url;
-                document.getElementById('modal-title').textContent = book.title;
-                document.getElementById('modal-author').textContent = `by ${book.author}`;
-                document.getElementById('modal-description').textContent = book.description;
-                
-                // Update rating
-                document.querySelector('.rating-value').textContent = book.rating;
-                
-                // Reset the Add to Library button
-                if (addToLibraryBtn) {
-                    addToLibraryBtn.innerHTML = '<i class="fas fa-bookmark"></i> Add to Library';
-                    addToLibraryBtn.style.background = '';
-                    addToLibraryBtn.style.borderColor = '';
-                    addToLibraryBtn.style.color = '';
-                    addToLibraryBtn.disabled = false;
-                }
-                
-                // Update status
-                const statusElement = document.getElementById('modal-status');
-                statusElement.textContent = 'Available';
-                statusElement.className = 'status-available';
-                
-                // Set PDF URL for reading
-                readPdfBtn.onclick = function() {
-                    window.open(book.pdf_url, '_blank');
-                };
-                
-                // Show modal
-                modal.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            } else {
-                console.error('Book not found:', bookId);
-            }
+       // Open modal function
+function openBookModal(bookId) {
+    console.log('Opening modal for book ID:', bookId);
+    currentBookId = bookId;
+    
+    const book = booksData[bookId];
+    
+ 
+    
+    if (book) {
+        // Update modal content
+        document.getElementById('modal-cover').src = book.cover_url;
+        document.getElementById('modal-title').textContent = book.title;
+        document.getElementById('modal-author').textContent = `by ${book.author}`;
+        document.getElementById('modal-description').textContent = book.description;
+        
+        // Update rating
+        document.querySelector('.rating-value').textContent = book.rating;
+        
+        // Reset the Add to Library button
+        if (addToLibraryBtn) {
+            addToLibraryBtn.innerHTML = '<i class="fas fa-bookmark"></i> Add to Library';
+            addToLibraryBtn.style.background = '';
+            addToLibraryBtn.style.borderColor = '';
+            addToLibraryBtn.style.color = '';
+            addToLibraryBtn.disabled = false;
         }
+        
+        // Update status
+        const statusElement = document.getElementById('modal-status');
+        statusElement.textContent = 'Available';
+        statusElement.className = 'status-available';
+        
+        // Set PDF URL for reading
+        readPdfBtn.onclick = function() {
+            window.open(book.pdf_url, '_blank');
+        };
+        
+        // Show modal
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    } else {
+        console.error('Book not found:', bookId);
+    }
+}
         
         // Open modal when clicking on book cards
         document.querySelectorAll('.book-card').forEach(card => {
@@ -1555,4 +1650,250 @@ function e($s) {
         document.querySelector('.sort-select')?.addEventListener('click', function() {
             alert('Sort options would appear here in a real application');
         });
+        // Review functionality
+let currentReviewBookId = null;
+
+// Star rating interaction
+document.addEventListener('DOMContentLoaded', function() {
+    const starRating = document.querySelector('.star-rating');
+    if (starRating) {
+        const stars = starRating.querySelectorAll('i');
+        
+        stars.forEach(star => {
+            star.addEventListener('mouseover', function() {
+                const rating = this.dataset.rating;
+                highlightStars(rating);
+            });
+            
+            star.addEventListener('mouseout', function() {
+                const currentRating = document.getElementById('rating-input').value;
+                highlightStars(currentRating);
+            });
+            
+            star.addEventListener('click', function() {
+                const rating = this.dataset.rating;
+                document.getElementById('rating-input').value = rating;
+                highlightStars(rating);
+            });
+        });
+    }
+});
+
+function highlightStars(rating) {
+    const stars = document.querySelectorAll('.star-rating i');
+    stars.forEach((star, index) => {
+        if (index < rating) {
+            star.className = 'fas fa-star';
+        } else {
+            star.className = 'far fa-star';
+        }
+    });
+}
+
+function openReviewModal() {
+    if (!currentBookId && !currentReviewBookId) {
+        alert('Please select a book first');
+        return;
+    }
+    
+    const bookId = currentReviewBookId || currentBookId;
+    const book = booksData[bookId];
+    
+    if (!book) {
+        alert('Book not found');
+        return;
+    }
+    
+    // Set book info in review modal
+    document.getElementById('review-book-id').value = bookId;
+    document.getElementById('review-book-cover').src = book.cover_url;
+    document.getElementById('review-book-title').textContent = book.title;
+    document.getElementById('review-book-author').textContent = `by ${book.author}`;
+    
+    // Check if user already reviewed this book
+    fetch(`get_reviews.php?book_id=${bookId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.user_review) {
+                document.getElementById('rating-input').value = data.user_review.rating;
+                document.getElementById('review-comment').value = data.user_review.comment;
+                highlightStars(data.user_review.rating);
+            } else {
+                document.getElementById('rating-input').value = 0;
+                document.getElementById('review-comment').value = '';
+                highlightStars(0);
+            }
+        });
+    
+    // Show modal
+    document.getElementById('review-modal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    
+    // Add click outside to close
+    setTimeout(() => {
+        const modal = document.getElementById('review-modal');
+        modal.addEventListener('click', function outsideClickHandler(e) {
+            if (e.target === modal) {
+                closeReviewModal();
+                modal.removeEventListener('click', outsideClickHandler);
+            }
+        });
+    }, 100);
+}
+
+function closeReviewModal() {
+    document.getElementById('review-modal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+function openReviewsListModal(bookId) {
+    currentReviewBookId = bookId;
+    const book = booksData[bookId];
+    
+    if (!book) return;
+    
+    // Fetch and display reviews
+    fetch(`get_reviews.php?book_id=${bookId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                displayReviews(data);
+            }
+        });
+    
+    document.getElementById('reviews-list-modal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeReviewsListModal() {
+    document.getElementById('reviews-list-modal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+    currentReviewBookId = null;
+}
+
+function displayReviews(data) {
+    // Update summary
+    document.getElementById('reviews-average').textContent = data.average_rating.toFixed(1);
+    document.getElementById('reviews-count').textContent = `${data.total_reviews} reviews`;
+    
+    // Generate stars
+    const starsContainer = document.getElementById('reviews-stars');
+    starsContainer.innerHTML = '';
+    const fullStars = Math.floor(data.average_rating);
+    const hasHalfStar = data.average_rating - fullStars >= 0.5;
+    
+    for (let i = 0; i < 5; i++) {
+        if (i < fullStars) {
+            starsContainer.innerHTML += '<i class="fas fa-star"></i>';
+        } else if (i === fullStars && hasHalfStar) {
+            starsContainer.innerHTML += '<i class="fas fa-star-half-alt"></i>';
+        } else {
+            starsContainer.innerHTML += '<i class="far fa-star"></i>';
+        }
+    }
+    
+    // Display reviews
+    const container = document.getElementById('reviews-container');
+    container.innerHTML = '';
+    
+    if (data.reviews.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: var(--gray); padding: 40px;">No reviews yet. Be the first to review!</p>';
+        return;
+    }
+    
+    data.reviews.forEach(review => {
+        const reviewElement = document.createElement('div');
+        reviewElement.style.cssText = 'padding: 20px 0; border-bottom: 1px solid var(--light-gray);';
+        
+        // Generate rating stars for this review
+        let reviewStars = '';
+        for (let i = 0; i < 5; i++) {
+            reviewStars += i < review.rating ? '<i class="fas fa-star" style="color: #ffc107;"></i>' : '<i class="far fa-star" style="color: #ffc107;"></i>';
+        }
+        
+        reviewElement.innerHTML = `
+            <div style="display: flex; gap: 15px; align-items: flex-start;">
+                <img src="${review.avatar_url}" alt="${review.user_name}" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">
+                <div style="flex: 1;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                        <h4 style="font-weight: 600;">${review.user_name}</h4>
+                        <span style="color: var(--gray); font-size: 0.9rem;">${review.created_at}</span>
+                    </div>
+                    <div style="margin-bottom: 10px;">${reviewStars}</div>
+                    <p style="color: var(--dark); line-height: 1.6;">${review.comment}</p>
+                    ${review.user_id == <?php echo $_SESSION['user_id'] ?? 0; ?> ? 
+                        `<div style="margin-top: 10px;">
+                            <button onclick="editReview(${review.review_id})" style="background: none; border: none; color: var(--primary); cursor: pointer; margin-right: 10px;"><i class="fas fa-edit"></i> Edit</button>
+                            <button onclick="deleteReview(${review.review_id})" style="background: none; border: none; color: #dc3545; cursor: pointer;"><i class="fas fa-trash"></i> Delete</button>
+                        </div>` : ''}
+                </div>
+            </div>
+        `;
+        container.appendChild(reviewElement);
+    });
+}
+
+// Handle review form submission
+document.getElementById('review-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    
+    fetch('submit_review.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            closeReviewModal();
+            // Refresh reviews if the list modal is open
+            if (document.getElementById('reviews-list-modal').style.display === 'flex') {
+                openReviewsListModal(document.getElementById('review-book-id').value);
+            }
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to submit review');
+    });
+});
+
+function editReview(reviewId) {
+    // Implement edit functionality
+    openReviewModal();
+}
+
+function deleteReview(reviewId) {
+    if (confirm('Are you sure you want to delete this review?')) {
+        fetch('delete_review.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'review_id=' + reviewId
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Review deleted successfully');
+                openReviewsListModal(currentReviewBookId);
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to delete review');
+        });
+    }
+}
+
+
     </script>
+
+</body>
+</html>
