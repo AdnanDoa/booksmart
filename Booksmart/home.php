@@ -24,24 +24,59 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-// Use the same MySQLi connection and catalog logic as catalog.php
-$books = [];
+// Database connection
+require_once __DIR__ . '/db_connect.php';
+
+// Fetch user data
+$user = null;
+if (isset($conn) && $conn) {
+    if ($stmt = $conn->prepare("SELECT user_id, name, email, avatar_url, bio, created_at FROM users WHERE user_id = ?")) {
+        $stmt->bind_param('i', $_SESSION['user_id']);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $user = $res ? $res->fetch_assoc() : null;
+        $stmt->close();
+    }
+}
+
+// Set user name for session if not set
+if (!isset($_SESSION['user_name']) && $user) {
+    $_SESSION['user_name'] = $user['name'];
+}
+
+// Fetch featured books (most popular or recently added)
+$featured_books = [];
 try {
-    require_once __DIR__ . '/db_connect.php';
-    $result = $conn->query("SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url 
-                   FROM books b 
-                   JOIN book_files bf ON b.book_id = bf.book_id 
-                   WHERE bf.file_type = 'pdf' 
-                   ORDER BY b.book_id DESC 
-                   LIMIT 12");
+    // Get books with average ratings and review counts
+    $result = $conn->query("
+        SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url,
+               COALESCE(AVG(r.rating), 0) as avg_rating,
+               COUNT(DISTINCT r.review_id) as review_count,
+               COUNT(DISTINCT ul.user_id) as reader_count
+        FROM books b
+        LEFT JOIN book_files bf ON b.book_id = bf.book_id AND bf.file_type = 'pdf'
+        LEFT JOIN reviews r ON b.book_id = r.book_id
+        LEFT JOIN user_library ul ON b.book_id = ul.book_id
+        WHERE bf.file_url IS NOT NULL
+        GROUP BY b.book_id
+        ORDER BY 
+            CASE 
+                WHEN COUNT(DISTINCT r.review_id) > 0 THEN COALESCE(AVG(r.rating), 0) * LOG(COUNT(DISTINCT r.review_id) + 1)
+                ELSE 0
+            END DESC,
+            b.created_at DESC
+        LIMIT 12
+    ");
+    
     if ($result) {
         while ($row = $result->fetch_assoc()) {
-            $books[] = $row;
+            $featured_books[] = $row;
         }
         $result->close();
     }
-    // If no books were found, attempt an import
-    if (count($books) === 0) {
+    
+    // If no books found, try to import some
+    if (count($featured_books) === 0) {
         $apiUrl = "https://gutendex.com/books/?languages=en&mime_type=application/pdf&page=1";
         $json = @file_get_contents($apiUrl);
         if ($json !== false) {
@@ -95,44 +130,123 @@ try {
         }
 
         // Re-run select after import
-        $books = [];
-        $result = $conn->query("SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url 
-                   FROM books b 
-                   JOIN book_files bf ON b.book_id = bf.book_id 
-                   WHERE bf.file_type = 'pdf' 
-                   ORDER BY b.book_id DESC 
-                   LIMIT 12");
+        $result = $conn->query("
+            SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url,
+                   COALESCE(AVG(r.rating), 0) as avg_rating,
+                   COUNT(DISTINCT r.review_id) as review_count
+            FROM books b
+            LEFT JOIN book_files bf ON b.book_id = bf.book_id AND bf.file_type = 'pdf'
+            LEFT JOIN reviews r ON b.book_id = r.book_id
+            WHERE bf.file_url IS NOT NULL
+            GROUP BY b.book_id
+            ORDER BY b.book_id DESC
+            LIMIT 12
+        ");
         if ($result) {
             while ($row = $result->fetch_assoc()) {
-                $books[] = $row;
+                $featured_books[] = $row;
             }
             $result->close();
         }
     }
 } catch (Exception $e) {
-    error_log('Catalog fetch failed: ' . $e->getMessage());
-    // Fallback books data
-    $books = [
-        ['title' => 'The Silent Patient', 'author' => 'Alex Michaelides', 'cover_image' => 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80'],
-        ['title' => 'Where the Crawdads Sing', 'author' => 'Delia Owens', 'cover_image' => 'https://images.unsplash.com/photo-1512820790803-83ca734da794?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80']
-    ];
-}
-
-// Fetch user data
-$user = null;
-// Use MySQLi connection from db_connect.php
-require_once __DIR__ . '/db_connect.php';
-if (isset($conn) && $conn) {
-    $user = null;
-    if ($stmt = $conn->prepare("SELECT * FROM users WHERE user_id = ?")) {
-        $stmt->bind_param('i', $_SESSION['user_id']);
-        $stmt->execute();
-        $res = $stmt->get_result();
-        $user = $res ? $res->fetch_assoc() : null;
-        $stmt->close();
+    error_log('Home page fetch failed: ' . $e->getMessage());
+    // Fallback: Try simple query
+    $simple_result = $conn->query("SELECT b.book_id, b.title, b.author, b.description, b.cover_url, bf.file_url, 0 as avg_rating, 0 as review_count
+                                   FROM books b 
+                                   JOIN book_files bf ON b.book_id = bf.book_id 
+                                   WHERE bf.file_type = 'pdf' 
+                                   ORDER BY b.book_id DESC 
+                                   LIMIT 12");
+    if ($simple_result) {
+        while ($row = $simple_result->fetch_assoc()) {
+            $featured_books[] = $row;
+        }
+        $simple_result->close();
     }
 }
+
+
+// Fetch user's reading stats
+$user_stats = [
+    'total_read' => 0,
+    'currently_reading' => 0,
+    'total_reviews' => 0
+];
+$stats_stmt = $conn->prepare("
+    SELECT 
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+        COUNT(CASE WHEN status = 'reading' THEN 1 END) as reading
+    FROM user_library WHERE user_id = ?
+");
+$stats_stmt->bind_param("i", $_SESSION['user_id']);
+$stats_stmt->execute();
+$stats_result = $stats_stmt->get_result();
+if ($stats_result && $stats_result->num_rows > 0) {
+    $stats = $stats_result->fetch_assoc();
+    $user_stats['total_read'] = $stats['completed'] ?? 0;
+    $user_stats['currently_reading'] = $stats['reading'] ?? 0;
+}
+$stats_stmt->close();
+
+$review_count_stmt = $conn->prepare("SELECT COUNT(*) as count FROM reviews WHERE user_id = ?");
+$review_count_stmt->bind_param("i", $_SESSION['user_id']);
+$review_count_stmt->execute();
+$review_count_result = $review_count_stmt->get_result();
+if ($review_count_result && $review_count_result->num_rows > 0) {
+    $user_stats['total_reviews'] = $review_count_result->fetch_assoc()['count'] ?? 0;
+}
+$review_count_stmt->close();
+
+// Fetch recent reviews from community
+$recent_reviews = [];
+$reviews_query = $conn->query("
+    SELECT r.*, u.name as user_name, u.avatar_url, b.title as book_title, b.cover_url as book_cover
+    FROM reviews r
+    JOIN users u ON r.user_id = u.user_id
+    JOIN books b ON r.book_id = b.book_id
+    ORDER BY r.created_at DESC
+    LIMIT 6
+");
+if ($reviews_query) {
+    while ($row = $reviews_query->fetch_assoc()) {
+        $recent_reviews[] = $row;
+    }
+    $reviews_query->close();
+}
+
+// Function to escape output
+function e($s) { 
+    return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); 
+}
+
+// Function to format time ago
+function time_ago($datetime) {
+    $time = strtotime($datetime);
+    $now = time();
+    $diff = $now - $time;
+    
+    if ($diff < 60) {
+        return 'just now';
+    } elseif ($diff < 3600) {
+        $mins = floor($diff / 60);
+        return $mins . ' minute' . ($mins > 1 ? 's' : '') . ' ago';
+    } elseif ($diff < 86400) {
+        $hours = floor($diff / 3600);
+        return $hours . ' hour' . ($hours > 1 ? 's' : '') . ' ago';
+    } elseif ($diff < 2592000) {
+        $days = floor($diff / 86400);
+        return $days . ' day' . ($days > 1 ? 's' : '') . ' ago';
+    } else {
+        return date('M j, Y', $time);
+    }
+}
+
+// Avatar URL
+$avatar_url = (!empty($user['avatar_url'])) ? $user['avatar_url'] : 'https://i.pravatar.cc/150?img=32';
+$user_name = $user['name'] ?? $_SESSION['user_name'] ?? 'Reader';
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -311,7 +425,7 @@ if (isset($conn) && $conn) {
             top: 60px;
             right: 0;
             background: white;
-            min-width: 200px;
+            min-width: 220px;
             border-radius: var(--border-radius);
             box-shadow: var(--box-shadow-lg);
             padding: 15px;
@@ -333,6 +447,8 @@ if (isset($conn) && $conn) {
             height: 70px;
             display: block;
             margin: 0 auto 15px;
+            border-radius: 50%;
+            object-fit: cover;
         }
 
         .profile-dropdown h3 {
@@ -462,7 +578,131 @@ if (isset($conn) && $conn) {
             transform: perspective(1000px) rotateY(-5deg) translateY(-10px);
         }
 
-        /* Featured Books Section */
+        /* Stats Cards */
+        .stats-section {
+            padding: 0 5% 40px;
+        }
+
+        .stats-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 25px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 25px 20px;
+            text-align: center;
+            box-shadow: var(--box-shadow);
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--box-shadow-lg);
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+        }
+
+        .stat-icon {
+            font-size: 2.5rem;
+            color: var(--primary);
+            margin-bottom: 15px;
+        }
+
+        .stat-number {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--dark);
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: var(--gray);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Reading Challenge Card */
+        .challenge-card {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: var(--border-radius-lg);
+            padding: 30px;
+            margin: 0 5% 40px;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .challenge-info h3 {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+        }
+
+        .challenge-info p {
+            opacity: 0.9;
+        }
+
+        .challenge-progress {
+            min-width: 250px;
+        }
+
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: white;
+            border-radius: 5px;
+            transition: width 0.5s ease;
+        }
+
+        .challenge-btn {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 10px 25px;
+            border-radius: 30px;
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .challenge-btn:hover {
+            background: white;
+            color: var(--primary);
+        }
+
+        /* Section Styles */
         .section {
             padding: 60px 5%;
         }
@@ -472,6 +712,8 @@ if (isset($conn) && $conn) {
             justify-content: space-between;
             align-items: center;
             margin-bottom: 40px;
+            flex-wrap: wrap;
+            gap: 15px;
         }
 
         .section-title {
@@ -521,6 +763,7 @@ if (isset($conn) && $conn) {
             box-shadow: var(--box-shadow);
             transition: var(--transition);
             position: relative;
+            cursor: pointer;
         }
 
         .book-card:hover {
@@ -593,6 +836,10 @@ if (isset($conn) && $conn) {
             margin-bottom: 8px;
             color: var(--dark);
             line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
         .book-author {
@@ -627,12 +874,90 @@ if (isset($conn) && $conn) {
             color: var(--success);
         }
 
-        .no-books-message {
-            grid-column: 1 / -1;
-            text-align: center;
-            padding: 40px;
+        /* Reviews Grid */
+        .reviews-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 30px;
+        }
+
+        .review-card {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 25px;
+            box-shadow: var(--box-shadow);
+            transition: var(--transition);
+        }
+
+        .review-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--box-shadow-lg);
+        }
+
+        .review-header {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .review-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        .review-user {
+            flex: 1;
+        }
+
+        .review-user h4 {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .review-date {
+            font-size: 0.8rem;
             color: var(--gray);
-            font-size: 1.1rem;
+        }
+
+        .review-rating {
+            display: flex;
+            gap: 3px;
+            margin-bottom: 12px;
+            color: var(--warning);
+        }
+
+        .review-text {
+            color: var(--gray);
+            margin-bottom: 15px;
+            line-height: 1.6;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .review-book {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding-top: 12px;
+            border-top: 1px solid var(--light-gray);
+            text-decoration: none;
+            color: var(--dark);
+        }
+
+        .review-book-cover {
+            width: 40px;
+            height: 55px;
+            border-radius: 6px;
+            object-fit: cover;
+        }
+
+        .review-book-title {
+            font-weight: 500;
+            font-size: 0.9rem;
         }
 
         /* Categories Section */
@@ -640,6 +965,7 @@ if (isset($conn) && $conn) {
             background: var(--light);
             border-radius: var(--border-radius-lg);
             padding: 60px 5%;
+            margin: 0 5% 40px;
         }
 
         .categories-grid {
@@ -656,6 +982,9 @@ if (isset($conn) && $conn) {
             box-shadow: var(--box-shadow);
             transition: var(--transition);
             cursor: pointer;
+            text-decoration: none;
+            color: var(--dark);
+            display: block;
         }
 
         .category-card:hover {
@@ -686,80 +1015,14 @@ if (isset($conn) && $conn) {
             font-size: 0.9rem;
         }
 
-        /* Testimonials */
-        .testimonials {
-            background: linear-gradient(135deg, #7209b7 0%, #4361ee 100%);
-            color: white;
-            padding: 80px 5%;
-            border-radius: var(--border-radius-lg);
-            margin: 60px 0;
-        }
-
-        .testimonials .section-title {
-            color: white;
-            text-align: center;
-            margin-bottom: 50px;
-        }
-
-        .testimonials .section-title::after {
-            left: 50%;
-            transform: translateX(-50%);
-            background: white;
-        }
-
-        .testimonials-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 30px;
-        }
-
-        .testimonial-card {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: var(--border-radius);
-            padding: 30px;
-            transition: var(--transition);
-        }
-
-        .testimonial-card:hover {
-            transform: translateY(-5px);
-            background: rgba(255, 255, 255, 0.15);
-        }
-
-        .testimonial-text {
-            font-style: italic;
-            margin-bottom: 20px;
-            line-height: 1.7;
-        }
-
-        .testimonial-author {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .testimonial-author img {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-        }
-
-        .author-info h4 {
-            margin-bottom: 5px;
-        }
-
-        .author-info p {
-            font-size: 0.9rem;
-            opacity: 0.8;
-        }
-
         /* Newsletter */
         .newsletter {
-            background: var(--light);
+            background: white;
             padding: 60px 5%;
             border-radius: var(--border-radius-lg);
             text-align: center;
-            margin: 60px 0;
+            margin: 0 5% 60px;
+            box-shadow: var(--box-shadow);
         }
 
         .newsletter h2 {
@@ -811,7 +1074,6 @@ if (isset($conn) && $conn) {
             background: var(--primary-dark);
             transform: translateY(-2px);
         }
-        
 
         /* Footer */
         footer {
@@ -892,327 +1154,203 @@ if (isset($conn) && $conn) {
             color: rgba(255, 255, 255, 0.6);
             font-size: 0.9rem;
         }
-        /* Book Modal Styles */
-#book-modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(10px);
-    z-index: 2000;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: opacity 0.4s ease;
-}
 
-#book-modal.active {
-    display: flex;
-    opacity: 1;
-    animation: modalFadeIn 0.4s ease;
-}
+        /* Modal Styles */
+        #book-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
 
-@keyframes modalFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
+        #book-modal.active {
+            display: flex;
+            opacity: 1;
+        }
 
-.modal-content {
-    background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
-    border-radius: var(--border-radius-lg);
-    max-width: 900px;
-    width: 90%;
-    max-height: 90vh;
-    overflow-y: auto;
-    position: relative;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
-    transform: scale(0.9);
-    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    overflow: hidden;
-}
+        .modal-content {
+            background: linear-gradient(145deg, #ffffff 0%, #f8f9fa 100%);
+            border-radius: var(--border-radius-lg);
+            max-width: 900px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+            transform: scale(0.9);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            overflow: hidden;
+        }
 
-#book-modal.active .modal-content {
-    transform: scale(1);
-}
+        #book-modal.active .modal-content {
+            transform: scale(1);
+        }
 
-.modal-close {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.9);
-    backdrop-filter: blur(10px);
-    border: none;
-    font-size: 1.5em;
-    color: var(--primary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-    transition: var(--transition);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-}
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: none;
+            font-size: 1.5em;
+            color: var(--primary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            transition: var(--transition);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
 
-.modal-close:hover {
-    background: var(--primary);
-    color: white;
-    transform: rotate(90deg);
-}
+        .modal-close:hover {
+            background: var(--primary);
+            color: white;
+            transform: rotate(90deg);
+        }
 
-.modal-body {
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-}
+        .modal-body {
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+        }
 
-@media (min-width: 768px) {
-    .modal-body {
-        flex-direction: row;
-    }
-}
+        @media (min-width: 768px) {
+            .modal-body {
+                flex-direction: row;
+            }
+        }
 
-.modal-cover-section {
-    flex: 1;
-    padding: 40px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-    position: relative;
-    overflow: hidden;
-}
+        .modal-cover-section {
+            flex: 1;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            position: relative;
+            overflow: hidden;
+        }
 
-.modal-cover-section::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" opacity="0.05"><path fill="white" d="M500,100 C700,50 900,150 900,350 C900,550 700,650 500,600 C300,650 100,550 100,350 C100,150 300,50 500,100 Z"/></svg>');
-    background-size: cover;
-}
+        .cover-container {
+            position: relative;
+            width: 100%;
+            max-width: 300px;
+            margin: 0 auto;
+            z-index: 2;
+        }
 
-.cover-container {
-    position: relative;
-    width: 100%;
-    max-width: 300px;
-    margin: 0 auto;
-    z-index: 2;
-}
+        #modal-cover {
+            width: 100%;
+            border-radius: var(--border-radius);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            transition: var(--transition);
+        }
 
-#modal-cover {
-    width: 100%;
-    border-radius: var(--border-radius);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-    transition: var(--transition);
-}
+        .modal-details-section {
+            flex: 1.5;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
 
-.cover-container:hover #modal-cover {
-    transform: translateY(-10px) rotateY(5deg);
-    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
-}
+        #modal-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: var(--dark);
+        }
 
-.cover-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.1) 100%);
-    border-radius: var(--border-radius);
-    opacity: 0;
-    transition: var(--transition);
-}
+        #modal-author {
+            font-size: 1.1rem;
+            color: var(--gray);
+            margin-bottom: 20px;
+        }
 
-.cover-container:hover .cover-overlay {
-    opacity: 1;
-}
+        .modal-rating {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
 
-.modal-details-section {
-    flex: 1.5;
-    padding: 40px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-}
+        .stars {
+            display: flex;
+            gap: 5px;
+            color: var(--warning);
+        }
 
-#modal-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 2.2rem;
-    margin-bottom: 10px;
-    color: var(--dark);
-    line-height: 1.2;
-}
+        #modal-status {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 30px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            align-self: flex-start;
+        }
 
-#modal-author {
-    font-size: 1.2rem;
-    color: var(--gray);
-    margin-bottom: 20px;
-    font-style: italic;
-}
+        .modal-description {
+            margin-bottom: 25px;
+            line-height: 1.7;
+            color: var(--gray);
+        }
 
-.modal-rating {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 20px;
-}
+        .modal-actions {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
 
-.stars {
-    display: flex;
-    gap: 5px;
-}
+        .action-btn {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px 20px;
+            border-radius: 30px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+            cursor: pointer;
+            border: none;
+            font-size: 0.95rem;
+            gap: 8px;
+        }
 
-.stars i {
-    color: var(--warning);
-    font-size: 1.2rem;
-}
+        .action-btn.primary {
+            background: var(--primary);
+            color: white;
+        }
 
-.rating-value {
-    font-weight: 600;
-    color: var(--dark);
-}
+        .action-btn.secondary {
+            background: transparent;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+        }
 
-.rating-count {
-    color: var(--gray);
-    font-size: 0.9rem;
-}
+        .action-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+        }
 
-#modal-status {
-    display: inline-block;
-    padding: 8px 20px;
-    border-radius: 30px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    margin-bottom: 25px;
-    align-self: flex-start;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-    cursor: pointer;
-}
-
-.status-available {
-    background: rgba(76, 201, 240, 0.2);
-    color: var(--success);
-}
-
-.status-borrowed {
-    background: rgba(247, 37, 133, 0.2);
-    color: var(--accent);
-}
-
-.status-reserved {
-    background: rgba(255, 158, 0, 0.2);
-    color: var(--warning);
-}
-
-.modal-description {
-    margin-bottom: 30px;
-    line-height: 1.7;
-    color: var(--gray);
-}
-
-.modal-meta {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
-    margin-bottom: 30px;
-}
-
-.meta-item {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-}
-
-.meta-label {
-    font-size: 0.8rem;
-    color: var(--gray);
-    margin-bottom: 5px;
-}
-
-.meta-value {
-    font-weight: 600;
-    color: var(--dark);
-}
-
-.modal-actions {
-    display: flex;
-    gap: 15px;
-    flex-wrap: wrap;
-}
-
-.action-btn {
-    flex: 1;
-    min-width: 120px;
-    padding: 14px 20px;
-    border-radius: 30px;
-    font-weight: 600;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: var(--transition);
-    cursor: pointer;
-    border: none;
-    font-size: 1rem;
-    gap: 8px;
-}
-
-.action-btn.primary {
-    background: var(--primary);
-    color: white;
-}
-
-.action-btn.secondary {
-    background: transparent;
-    color: var(--primary);
-    border: 2px solid var(--primary);
-}
-
-.action-btn:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
-}
-
-.status-borrowed {
-    background: rgba(247, 37, 133, 0.2);
-    color: var(--accent);
-}
-
-.status-reserved {
-    background: rgba(255, 158, 0, 0.2);
-    color: var(--warning);
-}
-
-.action-btn.primary:hover {
-    background: var(--primary-dark);
-}
-
-.action-btn.secondary:hover {
-    background: rgba(67, 97, 238, 0.1);
-}
-
-/* Floating animation for modal */
-@keyframes float {
-    0% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-    100% { transform: translateY(0px); }
-}
-
-.modal-content {
-    animation: float 6s ease-in-out infinite;
-}
-
-        /* Responsive Design */
+        /* Responsive */
         @media (max-width: 1100px) {
             .hero {
                 flex-direction: column;
@@ -1245,12 +1383,6 @@ if (isset($conn) && $conn) {
                 font-size: 2.5rem;
             }
             
-            .newsletter-form {
-                flex-direction: column;
-            }
-        }
-
-        @media (max-width: 576px) {
             .section-title {
                 font-size: 1.8rem;
             }
@@ -1260,8 +1392,27 @@ if (isset($conn) && $conn) {
                 gap: 20px;
             }
             
+            .reviews-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .challenge-card {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .newsletter-form {
+                flex-direction: column;
+            }
+        }
+
+        @media (max-width: 576px) {
             .book-cover {
                 height: 240px;
+            }
+            
+            .stats-container {
+                grid-template-columns: 1fr 1fr;
             }
         }
     </style>
@@ -1285,17 +1436,16 @@ if (isset($conn) && $conn) {
         <div class="header-actions">
             <div class="search-bar">
                 <i class="fas fa-search"></i>
-                <input type="text" placeholder="Search books, authors...">
+                <input type="text" placeholder="Search books, authors..." id="search-input">
             </div>
             
             <div class="profile">
-                <img id="headerAvatar" src="<?php echo !empty($user['avatar_url']) ? htmlspecialchars($user['avatar_url']) : 'https://i.pravatar.cc/150?img=32'; ?>" alt="Profile">
+                <img id="headerAvatar" src="<?php echo e($avatar_url); ?>" alt="Profile">
                 <div class="profile-dropdown">
-                    <img id="dropdownAvatar" src="<?php echo !empty($user['avatar_url']) ? htmlspecialchars($user['avatar_url']) : 'https://i.pravatar.cc/150?img=32'; ?>" alt="Profile">
-                    <h3 id="headerName"><?php echo htmlspecialchars($_SESSION['user_name']); ?></h3>
+                    <img src="<?php echo e($avatar_url); ?>" alt="Profile">
+                    <h3><?php echo e($user_name); ?></h3>
                     <a href="profpage.php"><i class="fas fa-user"></i> My Profile</a>
-                    <a href="#"><i class="fas fa-bookmark"></i> My Library</a>
-                    <a href="#" id="openEditProfile"><i class="fas fa-edit"></i> Edit Profile</a>
+                    <a href="mybooks.php"><i class="fas fa-bookmark"></i> My Library</a>
                     <a href="#"><i class="fas fa-cog"></i> Settings</a>
                     <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
                 </div>
@@ -1310,42 +1460,66 @@ if (isset($conn) && $conn) {
             <p>Explore thousands of books, track your reading, and connect with fellow book lovers in our vibrant community.</p>
             <div class="hero-buttons">
                 <a href="catalog.php" class="btn btn-primary">Explore Catalog</a>
+                <a href="challenge.php" class="btn btn-secondary">Join Challenge</a>
             </div>
         </div>
         <div class="hero-image">
-            <img src="https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1000&q=80" alt="Books Collection">
+            <img src="https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" alt="Books Collection">
         </div>
     </section>
 
-   
-  
+    <!-- Stats Section -->
+    <div class="stats-section">
+        <div class="stats-container">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-book-reader"></i></div>
+                <div class="stat-number"><?php echo $user_stats['total_read']; ?></div>
+                <div class="stat-label">Books Read</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-book-open"></i></div>
+                <div class="stat-number"><?php echo $user_stats['currently_reading']; ?></div>
+                <div class="stat-label">Currently Reading</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon"><i class="fas fa-star"></i></div>
+                <div class="stat-number"><?php echo $user_stats['total_reviews']; ?></div>
+                <div class="stat-label">Reviews Written</div>
+            </div>
+           
+        </div>
+    </div>
 
-    <!-- Featured Books -->
+
+    <!-- Featured Books Section -->
     <section class="section">
         <div class="section-header">
             <h2 class="section-title">Featured Books</h2>
             <a href="catalog.php" class="view-all">View All <i class="fas fa-arrow-right"></i></a>
         </div>
         
-        <div class="books-grid">
-            <?php if (!empty($books)): ?>
-                <?php foreach ($books as $book): ?>
-                    <div class='book-card' data-book-id='<?php echo htmlspecialchars($book['book_id'] ?? ''); ?>'>
+        <div class="books-grid" id="featured-books">
+            <?php if (!empty($featured_books)): ?>
+                <?php foreach ($featured_books as $book): ?>
+                    <div class='book-card' data-book-id='<?php echo e($book['book_id'] ?? ''); ?>'>
                         <div class='book-cover'>
-                            <img src='<?php echo htmlspecialchars($book['cover_url'] ?? $book['cover_image'] ?? ''); ?>' alt='<?php echo htmlspecialchars($book['title'] ?? ''); ?>' onerror="this.src='https://images.unsplash.com/photo-1544947950-fa07a98d237f?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80'">
+                            <img src='<?php echo e($book['cover_url'] ?? 'https://images.unsplash.com/photo-1544947950-fa07a98d237f'); ?>' alt='<?php echo e($book['title'] ?? ''); ?>' onerror="this.src='https://images.unsplash.com/photo-1544947950-fa07a98d237f?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80'">
                             <div class='book-overlay'>
                                 <button class='book-action view-details'><i class='fas fa-eye'></i></button>
-                                <button class='book-action'><i class='fas fa-bookmark'></i></button>
-                                <button class='book-action'><i class='fas fa-share-alt'></i></button>
+                                <button class='book-action add-to-library'><i class='fas fa-bookmark'></i></button>
+                                <button class='book-action share-book'><i class='fas fa-share-alt'></i></button>
                             </div>
                         </div>
                         <div class='book-info'>
-                            <h3 class='book-title'><?php echo htmlspecialchars($book['title'] ?? ''); ?></h3>
-                            <p class='book-author'><?php echo htmlspecialchars($book['author'] ?? ''); ?></p>
+                            <h3 class='book-title'><?php echo e($book['title'] ?? 'Untitled'); ?></h3>
+                            <p class='book-author'><?php echo e($book['author'] ?? 'Unknown Author'); ?></p>
                             <div class='book-meta'>
                                 <div class='book-rating'>
                                     <i class='fas fa-star'></i>
-                                    <span>4.5</span>
+                                    <span><?php echo number_format($book['avg_rating'] ?? 0, 1); ?></span>
+                                    <?php if (($book['review_count'] ?? 0) > 0): ?>
+                                        <span style="font-size: 0.7rem;">(<?php echo $book['review_count']; ?>)</span>
+                                    <?php endif; ?>
                                 </div>
                                 <span class='book-status status-available'>Available</span>
                             </div>
@@ -1353,406 +1527,90 @@ if (isset($conn) && $conn) {
                     </div>
                 <?php endforeach; ?>
             <?php else: ?>
-                <p style='grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--gray);'>No books found in the database.</p>
+                <p style='grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--gray);'>No books found in the database. <a href="catalog.php">Browse catalog</a> to add books.</p>
             <?php endif; ?>
         </div>
     </section>
-     <script>
-    const booksData = <?php
-    $__books_map = [];
-    foreach ($books as $__b) {
-        if (empty($__b['book_id'])) continue;
-        $__books_map[(string)$__b['book_id']] = [
-            'title' => $__b['title'] ?? '',
-            'author' => $__b['author'] ?? '',
-            'description' => $__b['description'] ?? '',
-            'pdf_url' => $__b['file_url'] ?? '',
-            'cover_url' => $__b['cover_url'] ?? ($__b['cover_image'] ?? ''),
-            'rating' => 4.5,
-            'status' => 'available'
-        ];
-    }
-    echo json_encode($__books_map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
-?>;
 
-// Global variable to track current book in modal
-let currentBookId = null;
+    <!-- Recent Reviews Section -->
+    <?php if (!empty($recent_reviews)): ?>
+    <section class="section" style="padding-top: 0;">
+        <div class="section-header">
+            <h2 class="section-title">Recent Community Reviews</h2>
+            <a href="reviews.php" class="view-all">View All <i class="fas fa-arrow-right"></i></a>
+        </div>
+        
+        <div class="reviews-grid">
+            <?php foreach ($recent_reviews as $review): ?>
+                <div class="review-card">
+                    <div class="review-header">
+                        <img src="<?php echo e($review['avatar_url'] ?? 'https://i.pravatar.cc/150?img=' . rand(1, 70)); ?>" alt="<?php echo e($review['user_name']); ?>" class="review-avatar">
+                        <div class="review-user">
+                            <h4><?php echo e($review['user_name']); ?></h4>
+                            <div class="review-date"><?php echo time_ago($review['created_at']); ?></div>
+                        </div>
+                    </div>
+                    <div class="review-rating">
+                        <?php for ($i = 1; $i <= 5; $i++): ?>
+                            <?php if ($i <= $review['rating']): ?>
+                                <i class="fas fa-star"></i>
+                            <?php else: ?>
+                                <i class="far fa-star"></i>
+                            <?php endif; ?>
+                        <?php endfor; ?>
+                    </div>
+                    <div class="review-text">
+                        <?php echo e(strlen($review['comment']) > 150 ? substr($review['comment'], 0, 150) . '...' : $review['comment']); ?>
+                    </div>
+                    <a href="reviews.php?book_id=<?php echo $review['book_id']; ?>" class="review-book">
+                        <img src="<?php echo e($review['book_cover'] ?? 'https://images.unsplash.com/photo-1544947950-fa07a98d237f'); ?>" alt="<?php echo e($review['book_title']); ?>" class="review-book-cover">
+                        <span class="review-book-title"><?php echo e($review['book_title']); ?></span>
+                    </a>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </section>
+    <?php endif; ?>
 
-// Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Initializing book modal...');
-    
-    const modal = document.getElementById('book-modal');
-    const closeModalBtn = document.getElementById('close-modal');
-    const readPdfBtn = document.getElementById('read-pdf');
-    
-    // Get the Add to Library button
-    const addToLibraryBtn = document.querySelector('.modal-actions .action-btn.secondary');
-    
-    // Debug log to check if elements exist
-    console.log('Book modal found:', !!modal);
-    console.log('Close button found:', !!closeModalBtn);
-    console.log('Read PDF button found:', !!readPdfBtn);
-    console.log('Add to Library button found:', !!addToLibraryBtn);
-    
-    // Only proceed if modal exists
-    if (!modal) {
-        console.error('Book modal element not found!');
-        return;
-    }
-    
-    // Book card click handlers
-    document.querySelectorAll('.book-card').forEach(element => {
-        element.addEventListener('click', (e) => {
-            const bookActionBtn = e.target.closest('.book-action');
-            if (bookActionBtn && !bookActionBtn.classList.contains('view-details')) {
-                return;
-            }
-            
-            if (bookActionBtn && bookActionBtn.classList.contains('view-details')) {
-                const bookId = element.getAttribute('data-book-id');
-                openBookModal(bookId);
-                return;
-            }
-            
-            const bookId = element.getAttribute('data-book-id');
-            openBookModal(bookId);
-        });
-    });
-
-    // Direct handler for eye button
-    document.querySelectorAll('.view-details').forEach(button => {
-        button.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const bookId = button.closest('.book-card').getAttribute('data-book-id');
-            openBookModal(bookId);
-        });
-    });
-    
-    function openBookModal(bookId) {
-        currentBookId = bookId; // Set the current book ID
-        const book = booksData[bookId];
-        if (book) {
-            document.getElementById('modal-cover').src = book.cover_url;
-            document.getElementById('modal-title').textContent = book.title;
-            document.getElementById('modal-author').textContent = `by ${book.author}`;
-            document.getElementById('modal-description').textContent = book.description;
-            document.querySelector('.rating-value').textContent = book.rating;
-            
-            // Reset the Add to Library button
-            if (addToLibraryBtn) {
-                addToLibraryBtn.innerHTML = '<i class="fas fa-bookmark"></i> Add to Library';
-                addToLibraryBtn.style.background = '';
-                addToLibraryBtn.style.borderColor = '';
-                addToLibraryBtn.style.color = '';
-                addToLibraryBtn.disabled = false;
-            }
-            
-            const statusElement = document.getElementById('modal-status');
-            statusElement.textContent = book.status.charAt(0).toUpperCase() + book.status.slice(1);
-            statusElement.className = '';
-            statusElement.classList.add('status-available');
-            
-            // Set PDF button handler
-            if (readPdfBtn) {
-                readPdfBtn.onclick = function() {
-                    if (book.pdf_url) window.open(book.pdf_url, '_blank');
-                };
-            }
-            
-            modal.classList.add('active');
-            document.body.style.overflow = 'hidden';
-        }
-    }
-    
-    // Add to Library button functionality
-    if (addToLibraryBtn) {
-        addToLibraryBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            
-            console.log('Add to Library clicked');
-            console.log('Current book ID:', currentBookId);
-            
-            if (!currentBookId) {
-                alert('No book selected');
-                return;
-            }
-            
-            // Store original button content
-            const originalContent = this.innerHTML;
-            
-            // Show loading state
-            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
-            this.disabled = true;
-            
-            // Send AJAX request
-            fetch('add_to_library.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'book_id=' + currentBookId + '&status=want_to_read'
-            })
-            .then(response => response.json())
-            .then(data => {
-                console.log('Response:', data);
-                
-                if (data.success) {
-                    // Success - update button
-                    this.innerHTML = '<i class="fas fa-check"></i> Added!';
-                    this.style.background = '#4cc9f0';
-                    this.style.borderColor = '#4cc9f0';
-                    this.style.color = 'white';
-                    
-                    // Update bookmark icon in the grid if it exists
-                    const bookCard = document.querySelector(`.book-card[data-book-id="${currentBookId}"]`);
-                    if (bookCard) {
-                        const bookmarkIcon = bookCard.querySelector('.book-action i.fa-bookmark');
-                        if (bookmarkIcon) {
-                            bookmarkIcon.style.color = '#4361ee';
-                        }
-                    }
-                    
-                    alert('Book added to your library!');
-                    
-                    // Reset button after 2 seconds
-                    setTimeout(() => {
-                        this.innerHTML = originalContent;
-                        this.style.background = '';
-                        this.style.borderColor = '';
-                        this.style.color = '';
-                        this.disabled = false;
-                    }, 2000);
-                } else {
-                    alert('Error: ' + data.message);
-                    this.innerHTML = originalContent;
-                    this.disabled = false;
-                }
-            })
-            .catch(error => {
-                console.error('Fetch Error:', error);
-                alert('Failed to connect to server');
-                this.innerHTML = originalContent;
-                this.disabled = false;
-            });
-        });
-    }
-    
-    // Close modal handlers
-    if (closeModalBtn) {
-        closeModalBtn.addEventListener('click', () => {
-            modal.classList.remove('active');
-            document.body.style.overflow = 'auto';
-        });
-    }
-    
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.classList.remove('active');
-            document.body.style.overflow = 'auto';
-        }
-    });
-    
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && modal.classList.contains('active')) {
-            modal.classList.remove('active');
-            document.body.style.overflow = 'auto';
-        }
-    });
-
-    // Bookmark buttons in grid
-    document.querySelectorAll('.book-action').forEach(button => {
-        button.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const icon = this.querySelector('i');
-            const action = icon.className;
-            const bookCard = this.closest('.book-card');
-            const bookTitle = bookCard.querySelector('.book-title').textContent;
-            const bookId = bookCard.getAttribute('data-book-id');
-            
-            if (action.includes('fa-bookmark')) {
-                // Handle bookmark click
-                const originalClass = icon.className;
-                icon.className = 'fas fa-spinner fa-spin';
-                
-                fetch('add_to_library.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: 'book_id=' + bookId + '&status=want_to_read'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        icon.className = 'fas fa-bookmark';
-                        icon.style.color = '#4361ee';
-                        alert(`"${bookTitle}" added to your library!`);
-                    } else {
-                        icon.className = originalClass;
-                        alert('Error: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    icon.className = originalClass;
-                    alert('Failed to add book to library');
-                });
-                
-            } else if (action.includes('fa-share-alt')) {
-                alert(`Sharing "${bookTitle}"`);
-            }
-        });
-    });
-    
-    console.log('Book modal initialized successfully');
-});
-
-// Profile modal functionality (keeping your existing code)
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Initializing profile modal...');
-    
-    const profileModal = document.getElementById('profileModal');
-    const openEdit = document.getElementById('openEditProfile');
-    const closeBtn = document.getElementById('closeProfile');
-    
-    console.log('Profile modal found:', !!profileModal);
-    console.log('Open edit button found:', !!openEdit);
-    console.log('Close button found:', !!closeBtn);
-    
-    if (openEdit && profileModal) {
-        openEdit.addEventListener('click', function(e) {
-            e.preventDefault();
-            profileModal.style.display = 'flex';
-        });
-    } else {
-        console.warn('Profile modal elements not found');
-    }
-
-    if (closeBtn && profileModal) {
-        closeBtn.addEventListener('click', function() {
-            profileModal.style.display = 'none';
-        });
-    }
-
-    window.addEventListener('click', function(event) {
-        if (profileModal && event.target === profileModal) {
-            profileModal.style.display = 'none';
-        }
-    });
-    
-    console.log('Profile modal initialized successfully');
-});
-</script>
-
-    <!-- Categories -->
-    <section class="categories">
+    <!-- Categories Section -->
+    <div class="categories">
         <div class="section-header">
             <h2 class="section-title">Browse Categories</h2>
             <a href="catalog.php" class="view-all">View All <i class="fas fa-arrow-right"></i></a>
         </div>
         
         <div class="categories-grid">
-            <div class="category-card">
-                <div class="category-icon">
-                    <i class="fas fa-magic"></i>
-                </div>
-                <h3>Fantasy</h3>
-                <p>0 books</p>
-            </div>
-            
-            <div class="category-card">
-                <div class="category-icon">
-                    <i class="fas fa-user-secret"></i>
-                </div>
-                <h3>Mystery</h3>
-                <p>0 books</p>
-            </div>
-            
-            <div class="category-card">
-                <div class="category-icon">
-                    <i class="fas fa-heart"></i>
-                </div>
-                <h3>Romance</h3>
-                <p>0 books</p>
-            </div>
-            
-            <div class="category-card">
-                <div class="category-icon">
-                    <i class="fas fa-rocket"></i>
-                </div>
-                <h3>Sci-Fi</h3>
-                <p>0 books</p>
-            </div>
-            
-            <div class="category-card">
-                <div class="category-icon">
-                    <i class="fas fa-graduation-cap"></i>
-                </div>
-                <h3>Non-Fiction</h3>
-                <p>0 books</p>
-            </div>
-            
-            <div class="category-card">
-                <div class="category-icon">
-                    <i class="fas fa-theater-masks"></i>
-                </div>
-                <h3>Drama</h3>
-                <p>0 books</p>
-            </div>
+            <?php
+            $categories = [
+                ['icon' => 'fa-magic', 'name' => 'Fantasy', 'count' => 0],
+                ['icon' => 'fa-user-secret', 'name' => 'Mystery', 'count' => 0],
+                ['icon' => 'fa-heart', 'name' => 'Romance', 'count' => 0],
+                ['icon' => 'fa-rocket', 'name' => 'Sci-Fi', 'count' => 0],
+                ['icon' => 'fa-graduation-cap', 'name' => 'Non-Fiction', 'count' => 0],
+                ['icon' => 'fa-theater-masks', 'name' => 'Drama', 'count' => 0],
+            ];
+            foreach ($categories as $cat):
+            ?>
+                <a href="catalog.php?category=<?php echo strtolower($cat['name']); ?>" class="category-card">
+                    <div class="category-icon">
+                        <i class="fas <?php echo $cat['icon']; ?>"></i>
+                    </div>
+                    <h3><?php echo $cat['name']; ?></h3>
+                    <p><?php echo $cat['count']; ?> books</p>
+                </a>
+            <?php endforeach; ?>
         </div>
-    </section>
-
-    <!-- Testimonials -->
-    <section class="testimonials">
-        <h2 class="section-title">What Readers Say</h2>
-        
-        <div class="testimonials-grid">
-            <div class="testimonial-card">
-                <p class="testimonial-text">"Booksmart has completely transformed my reading habits. The recommendations are spot on, and I've discovered so many amazing books I wouldn't have found otherwise."</p>
-                <div class="testimonial-author">
-                    <img src="https://www.bing.com/th/id/OSK.N1w4Pv9SwE61SuQ6XYAOwcsDeOnCgMPpyNtTZYC_Mmk?w=224&h=200&c=8&rs=1&qlt=90&o=6&pid=3.1&rm=2" alt="User">
-                    <div class="author-info">
-                        <h4>Boris Diaw</h4>
-                        <p>Penzionisani košarkaš</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="testimonial-card">
-                <p class="testimonial-text">"Stranica radi čvrsto,brzo se učitava knjige su uredno složene. Ako nešto i fula, to su male sitnice, al' ništa što ne može se popraviti."</p>
-                <div class="testimonial-author">
-                    <img src="https://th.bing.com/th/id/OIP.4yu0inWVd6hcux9Ge4KGDgHaE3?w=296&h=194&c=7&r=0&o=7&pid=1.7&rm=3" alt="User">
-                    <div class="author-info">
-                        <h4>Ramo Isak</h4>
-                        <p>Ministar Odbrane</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="testimonial-card">
-                <p class="testimonial-text">"I've tried many reading apps, but Booksmart stands out with its beautiful interface and powerful features. It's like having a personal librarian!"</p>
-                <div class="testimonial-author">
-                    <img src="https://th.bing.com/th?q=Darko+Lazic+Velika+Slika&w=120&h=120&c=1&rs=1&qlt=70&o=7&cb=1&pid=InlineBlock&rm=3&mkt=en-WW&cc=BA&setlang=en&adlt=moderate&t=1&mw=247" alt="User">
-                    <div class="author-info">
-                        <h4>Darko Lazić</h4>
-                        <p>Pjevač</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
+    </div>
 
     <!-- Newsletter -->
-    <section class="newsletter">
+    <div class="newsletter">
         <h2>Stay Updated</h2>
         <p>Subscribe to our newsletter to receive the latest book recommendations, news, and exclusive offers.</p>
-        <form class="newsletter-form">
-            <input type="email" placeholder="Your email address">
+        <form class="newsletter-form" id="newsletter-form">
+            <input type="email" placeholder="Your email address" required>
             <button type="submit">Subscribe</button>
         </form>
-    </section>
+    </div>
 
     <!-- Footer -->
     <footer>
@@ -1783,7 +1641,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <h3>Account</h3>
                 <ul class="footer-links">
                     <li><a href="profpage.php">Profile</a></li>
-                    <li><a href="#">My Library</a></li>
+                    <li><a href="mybooks.php">My Library</a></li>
                     <li><a href="#">Settings</a></li>
                     <li><a href="#">Help & Support</a></li>
                     <li><a href="logout.php">Logout</a></li>
@@ -1801,139 +1659,245 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
         
         <div class="footer-bottom">
-            <p>&copy; 2023 Booksmart. All rights reserved.</p>
+            <p>&copy; <?php echo date('Y'); ?> Booksmart. All rights reserved.</p>
         </div>
     </footer>
 
-    <!-- Edit Profile Modal -->
-    <div id="profileModal" style="display:none;position:fixed;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;z-index:2000;">
-        <div style="background:white;padding:20px;border-radius:10px;max-width:480px;width:90%;">
-            <h3>Edit Profile</h3>
-            <form id="profileForm" action="profile_update.php" method="POST" enctype="multipart/form-data">
-                <div style="margin-bottom:12px;">
-                    <label>Avatar (jpg/png/gif)</label><br>
-                    <input type="file" name="avatar" accept="image/*">
+    <!-- Book Modal -->
+    <div id="book-modal">
+        <div class="modal-content">
+            <button class="modal-close" id="close-modal">
+                <i class="fas fa-times"></i>
+            </button>
+            <div class="modal-body">
+                <div class="modal-cover-section">
+                    <div class="cover-container">
+                        <img id="modal-cover" src="" alt="Book Cover">
+                    </div>
                 </div>
-                <div style="margin-bottom:12px;">
-                    <label>Bio</label><br>
-                    <textarea name="bio" id="bioField" rows="4" style="width:100%;"><?php echo isset($user['bio']) ? htmlspecialchars($user['bio']) : ''; ?></textarea>
+                <div class="modal-details-section">
+                    <h2 id="modal-title">Book Title</h2>
+                    <p id="modal-author">by Author Name</p>
+                    
+                    <div class="modal-rating">
+                        <div class="stars" id="modal-stars"></div>
+                        <span id="modal-rating-value">0.0</span>
+                    </div>
+                    
+                    <span id="modal-status" class="status-available">Available</span>
+                    
+                    <p class="modal-description" id="modal-description">
+                        Book description will appear here...
+                    </p>
+                    
+                    <div class="modal-actions">
+                        <button class="action-btn primary" id="read-pdf">
+                            <i class="fas fa-book-open"></i> Read Now
+                        </button>
+                        <button class="action-btn secondary" id="add-to-library-modal">
+                            <i class="fas fa-bookmark"></i> Add to Library
+                        </button>
+                        <button class="action-btn secondary" id="view-reviews-modal">
+                            <i class="fas fa-star"></i> Reviews
+                        </button>
+                    </div>
                 </div>
-                <div style="display:flex;gap:10px;justify-content:flex-end;">
-                    <button type="button" id="closeProfile">Cancel</button>
-                    <button type="submit">Save</button>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
 
     <script>
-   // Wait for DOM to be fully loaded
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Initializing profile modal...');
-    
-    const profileModal = document.getElementById('profileModal');
-    const openEdit = document.getElementById('openEditProfile');
-    const closeBtn = document.getElementById('closeProfile');
-    
-    // Debug log to check if elements exist
-    console.log('Profile modal found:', !!profileModal);
-    console.log('Open edit button found:', !!openEdit);
-    console.log('Close button found:', !!closeBtn);
-    
-    if (openEdit && profileModal) {
-        openEdit.addEventListener('click', function(e) {
-            e.preventDefault();
-            profileModal.style.display = 'flex';
-        });
-    } else {
-        console.warn('Profile modal elements not found');
-    }
+        // Book data from PHP
+        const booksData = <?php
+            $__books_map = [];
+            foreach ($featured_books as $__b) {
+                if (empty($__b['book_id'])) continue;
+                $__books_map[(string)$__b['book_id']] = [
+                    'title' => $__b['title'] ?? '',
+                    'author' => $__b['author'] ?? '',
+                    'description' => $__b['description'] ?? '',
+                    'pdf_url' => $__b['file_url'] ?? '',
+                    'cover_url' => $__b['cover_url'] ?? '',
+                    'rating' => floatval($__b['avg_rating'] ?? 0),
+                    'status' => 'available'
+                ];
+            }
+            echo json_encode($__books_map, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP);
+        ?>;
 
-    if (closeBtn && profileModal) {
-        closeBtn.addEventListener('click', function() {
-            profileModal.style.display = 'none';
-        });
-    }
+        let currentBookId = null;
+        let currentBookData = null;
 
-    // Close modal when clicking outside
-    window.addEventListener('click', function(event) {
-        if (profileModal && event.target === profileModal) {
-            profileModal.style.display = 'none';
+        // DOM Elements
+        const modal = document.getElementById('book-modal');
+        const closeModalBtn = document.getElementById('close-modal');
+        const readPdfBtn = document.getElementById('read-pdf');
+        const addToLibraryModalBtn = document.getElementById('add-to-library-modal');
+        const viewReviewsModalBtn = document.getElementById('view-reviews-modal');
+
+        // Open modal function
+        function openBookModal(bookId) {
+            currentBookId = bookId;
+            currentBookData = booksData[bookId];
+            
+            if (currentBookData) {
+                document.getElementById('modal-cover').src = currentBookData.cover_url || 'https://images.unsplash.com/photo-1544947950-fa07a98d237f';
+                document.getElementById('modal-title').textContent = currentBookData.title;
+                document.getElementById('modal-author').textContent = `by ${currentBookData.author}`;
+                document.getElementById('modal-description').textContent = currentBookData.description || 'No description available for this book.';
+                
+                // Update rating stars
+                const rating = currentBookData.rating || 0;
+                document.getElementById('modal-rating-value').textContent = rating.toFixed(1);
+                const starsContainer = document.getElementById('modal-stars');
+                starsContainer.innerHTML = '';
+                const fullStars = Math.floor(rating);
+                const hasHalfStar = rating - fullStars >= 0.5;
+                for (let i = 0; i < 5; i++) {
+                    if (i < fullStars) {
+                        starsContainer.innerHTML += '<i class="fas fa-star"></i>';
+                    } else if (i === fullStars && hasHalfStar) {
+                        starsContainer.innerHTML += '<i class="fas fa-star-half-alt"></i>';
+                    } else {
+                        starsContainer.innerHTML += '<i class="far fa-star"></i>';
+                    }
+                }
+                
+                modal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
         }
-    });
-    
-    console.log('Profile modal initialized successfully');
-});
-    </script>
-    <!-- Sexy Book Details Modal -->
-<div id="book-modal">
-    <div class="modal-content">
-        <button class="modal-close" id="close-modal">
-            <i class="fas fa-times"></i>
-        </button>
-        <div class="modal-body">
-            <div class="modal-cover-section">
-                <div class="cover-container">
-                    <img id="modal-cover" src="" alt="Book Cover">
-                    <div class="cover-overlay"></div>
-                </div>
-            </div>
-            <div class="modal-details-section">
-                <h2 id="modal-title">Book Title</h2>
-                <p id="modal-author">by Author Name</p>
-                
-                <div class="modal-rating">
-                    <div class="stars">
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star-half-alt"></i>
-                    </div>
-                    <span class="rating-value">4.5</span>
-                    <span class="rating-count">(12,345 reviews)</span>
-                </div>
-                
-                <span id="modal-status" class="status-available">Available</span>
-                
-                <p class="modal-description" id="modal-description">
-                    Book description will appear here...
-                </p>
-                
-                <div class="modal-meta">
-                    <div class="meta-item">
-                        <span class="meta-label">Published</span>
-                        <span class="meta-value" id="modal-published">Unknown</span>
-                    </div>
-                    <div class="meta-item">
-                        <span class="meta-label">Pages</span>
-                        <span class="meta-value" id="modal-pages">Unknown</span>
-                    </div>
-                    <div class="meta-item">
-                        <span class="meta-label">Genre</span>
-                        <span class="meta-value" id="modal-genre">Unknown</span>
-                    </div>
-                    <div class="meta-item">
-                        <span class="meta-label">Format</span>
-                        <span class="meta-value" id="modal-format">PDF</span>
-                    </div>
-                </div>
-                
-                <div class="modal-actions">
-                    <button class="action-btn primary" id="read-pdf">
-                        <i class="fas fa-book-open"></i> Read PDF
-                    </button>
-                    <button class="action-btn secondary">
-                        <i class="fas fa-bookmark"></i> Add to Library
-                    </button>
-                    <button class="action-btn secondary">
-                        <i class="fas fa-share-alt"></i> Share
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
+        // Close modal
+        function closeModal() {
+            modal.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Add to library function
+        function addToLibrary(bookId) {
+            if (!bookId) return;
+            
+            fetch('add_to_library.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'book_id=' + bookId + '&status=want_to_read'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Book added to your library!');
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to add book'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to connect to server');
+            });
+        }
+
+        // View reviews function
+        function viewReviews(bookId) {
+            window.location.href = `reviews.php?book_id=${bookId}`;
+        }
+
+        // Event Listeners
+        closeModalBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active')) closeModal();
+        });
+
+        if (readPdfBtn) {
+            readPdfBtn.addEventListener('click', () => {
+                if (currentBookData && currentBookData.pdf_url) {
+                    window.open(currentBookData.pdf_url, '_blank');
+                } else {
+                    alert('PDF URL not available for this book.');
+                }
+            });
+        }
+
+        if (addToLibraryModalBtn) {
+            addToLibraryModalBtn.addEventListener('click', () => {
+                if (currentBookId) addToLibrary(currentBookId);
+            });
+        }
+
+        if (viewReviewsModalBtn) {
+            viewReviewsModalBtn.addEventListener('click', () => {
+                if (currentBookId) viewReviews(currentBookId);
+            });
+        }
+
+        // Book card click handlers
+        document.querySelectorAll('.book-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('.book-action')) return;
+                const bookId = card.getAttribute('data-book-id');
+                if (bookId) openBookModal(bookId);
+            });
+        });
+
+        // View details buttons
+        document.querySelectorAll('.view-details').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const bookId = btn.closest('.book-card').getAttribute('data-book-id');
+                if (bookId) openBookModal(bookId);
+            });
+        });
+
+        // Add to library buttons in grid
+        document.querySelectorAll('.add-to-library').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const bookId = btn.closest('.book-card').getAttribute('data-book-id');
+                if (bookId) addToLibrary(bookId);
+            });
+        });
+
+        // Share buttons
+        document.querySelectorAll('.share-book').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const bookTitle = btn.closest('.book-card').querySelector('.book-title')?.textContent || 'this book';
+                alert(`Sharing "${bookTitle}"`);
+            });
+        });
+
+        // Search functionality
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const query = searchInput.value.trim();
+                    if (query) {
+                        window.location.href = `catalog.php?search=${encodeURIComponent(query)}`;
+                    }
+                }
+            });
+        }
+
+        // Newsletter form
+        const newsletterForm = document.getElementById('newsletter-form');
+        if (newsletterForm) {
+            newsletterForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const email = newsletterForm.querySelector('input').value;
+                if (email) {
+                    alert(`Thank you for subscribing with ${email}! You'll receive our latest updates.`);
+                    newsletterForm.reset();
+                }
+            });
+        }
+
+        console.log('Home page loaded with', Object.keys(booksData).length, 'books');
+    </script>
 </body>
 </html>
